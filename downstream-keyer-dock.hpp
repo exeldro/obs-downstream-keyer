@@ -8,6 +8,8 @@ class DownstreamKeyerDock : public QDockWidget {
 private:
 	QVBoxLayout *mainLayout;
 	int outputChannel;
+
+	void ClearKeyers();
 private slots:
 
 public:

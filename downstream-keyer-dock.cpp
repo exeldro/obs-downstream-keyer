@@ -68,6 +68,7 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent) : QDockWidget(parent)
 DownstreamKeyerDock::~DownstreamKeyerDock()
 {
 	obs_frontend_remove_save_callback(frontend_save_load, this);
+	ClearKeyers();
 }
 
 void DownstreamKeyerDock::Save(obs_data_t *data)
@@ -85,6 +86,7 @@ void DownstreamKeyerDock::Save(obs_data_t *data)
 	}
 	obs_data_set_array(data, "downstream_keyers", keyers);
 	obs_data_array_release(keyers);
+	ClearKeyers();
 }
 
 void DownstreamKeyerDock::Load(obs_data_t *data)
@@ -92,6 +94,7 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 	outputChannel = obs_data_get_int(data, "downstream_keyers_channel");
 	if (outputChannel < 7)
 		outputChannel = 7;
+	ClearKeyers();
 	obs_data_array_t * keyers = obs_data_get_array(data, "downstream_keyers");
 	if (keyers) {
 		auto count = obs_data_array_count(keyers);
@@ -105,5 +108,15 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 		obs_data_array_release(keyers);
 	}else {
 		mainLayout->addWidget(new DownstreamKeyer(outputChannel));
+	}
+}
+
+void DownstreamKeyerDock::ClearKeyers() {
+	while (mainLayout->count()) {
+		QLayoutItem *item = mainLayout->itemAt(0);
+		auto w = dynamic_cast<DownstreamKeyer *>(item->widget());
+		mainLayout->removeItem(item);
+		delete item;
+		delete w;
 	}
 }

@@ -149,7 +149,11 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 
 DownstreamKeyer::~DownstreamKeyer()
 {
-	obs_source_release(transition);
+	obs_set_output_source(outputChannel, nullptr);
+	if (transition) {
+		obs_transition_clear(transition);
+		obs_source_release(transition);
+	}
 }
 
 void DownstreamKeyer::on_actionAddScene_triggered()
@@ -266,8 +270,11 @@ void DownstreamKeyer::on_transitionList_currentIndexChanged(int)
 		} else {
 			obs_set_output_source(outputChannel, nullptr);
 		}
-		obs_source_release(transition);
-		transition = nullptr; 
+		if (transition) {
+			transition = nullptr;
+			obs_transition_clear(oldTransition);
+			obs_source_release(oldTransition);
+		}
 		return;
 	}
 	if (oldTransitionName &&
@@ -284,6 +291,7 @@ void DownstreamKeyer::on_transitionList_currentIndexChanged(int)
 		obs_set_output_source(outputChannel, newTransitionCopy);
 		transition = newTransitionCopy;
 		obs_transition_swap_end(newTransitionCopy, oldTransition);
+		obs_transition_clear(oldTransition);
 		obs_source_release(oldTransition);
 	} else {
 		auto item = scenesList->currentItem();
