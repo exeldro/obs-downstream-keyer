@@ -19,4 +19,6 @@ public:
 	void Load(obs_data_t *data);
 	void ClearKeyers();
 	void AddDefaultKeyer();
+
+	bool loadedBeforeSwitchSceneCollection;
 };

@@ -51,6 +51,15 @@ static void frontend_event(enum obs_frontend_event event, void *data)
 	if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP) {
 		downstreamKeyerDock->ClearKeyers();
 		downstreamKeyerDock->AddDefaultKeyer();
+	} else if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED) {
+		// for as long as OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP does not work
+		if (!downstreamKeyerDock->loadedBeforeSwitchSceneCollection) {
+			downstreamKeyerDock->ClearKeyers();
+			downstreamKeyerDock->AddDefaultKeyer();
+		}else {
+			downstreamKeyerDock->loadedBeforeSwitchSceneCollection =
+				false;
+		}
 	}
 }
 
@@ -94,9 +103,6 @@ void DownstreamKeyerDock::Save(obs_data_t *data)
 	}
 	obs_data_set_array(data, "downstream_keyers", keyers);
 	obs_data_array_release(keyers);
-	// for as long as OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP does not work
-	ClearKeyers();
-	AddDefaultKeyer();
 }
 
 void DownstreamKeyerDock::Load(obs_data_t *data)
@@ -123,6 +129,7 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 	} else {
 		AddDefaultKeyer();
 	}
+	loadedBeforeSwitchSceneCollection = true;
 }
 
 void DownstreamKeyerDock::ClearKeyers()
