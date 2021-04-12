@@ -8,11 +8,9 @@
 #define QT_UTF8(str) QString::fromUtf8(str)
 #define QT_TO_UTF8(str) str.toUtf8().constData()
 
-
 OBS_DECLARE_MODULE()
 OBS_MODULE_AUTHOR("Exeldro");
 OBS_MODULE_USE_DEFAULT_LOCALE("media-controls", "en-US")
-
 
 bool obs_module_load()
 {
@@ -37,7 +35,6 @@ MODULE_EXPORT const char *obs_module_name(void)
 	return obs_module_text("DownstreamKeyer");
 }
 
-
 static void frontend_save_load(obs_data_t *save_data, bool saving, void *data)
 {
 	auto downstreamKeyerDock = static_cast<DownstreamKeyerDock *>(data);
@@ -45,6 +42,15 @@ static void frontend_save_load(obs_data_t *save_data, bool saving, void *data)
 		downstreamKeyerDock->Save(save_data);
 	} else {
 		downstreamKeyerDock->Load(save_data);
+	}
+}
+
+static void frontend_event(enum obs_frontend_event event, void *data)
+{
+	auto downstreamKeyerDock = static_cast<DownstreamKeyerDock *>(data);
+	if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP) {
+		downstreamKeyerDock->ClearKeyers();
+		downstreamKeyerDock->AddDefaultKeyer();
 	}
 }
 
@@ -63,11 +69,13 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent) : QDockWidget(parent)
 	setWidget(dockWidgetContents);
 
 	obs_frontend_add_save_callback(frontend_save_load, this);
+	obs_frontend_add_event_callback(frontend_event, this);
 }
 
 DownstreamKeyerDock::~DownstreamKeyerDock()
 {
 	obs_frontend_remove_save_callback(frontend_save_load, this);
+	obs_frontend_remove_event_callback(frontend_event, this);
 	ClearKeyers();
 }
 
@@ -76,8 +84,8 @@ void DownstreamKeyerDock::Save(obs_data_t *data)
 	obs_data_set_int(data, "downstream_keyers_channel", outputChannel);
 	obs_data_array_t *keyers = obs_data_array_create();
 	int count = mainLayout->count();
-	for (int i = 0; i<count;i++) {
-		QLayoutItem * item = mainLayout->itemAt(i);
+	for (int i = 0; i < count; i++) {
+		QLayoutItem *item = mainLayout->itemAt(i);
 		auto w = dynamic_cast<DownstreamKeyer *>(item->widget());
 		const auto keyerData = obs_data_create();
 		w->Save(keyerData);
@@ -86,7 +94,9 @@ void DownstreamKeyerDock::Save(obs_data_t *data)
 	}
 	obs_data_set_array(data, "downstream_keyers", keyers);
 	obs_data_array_release(keyers);
+	// for as long as OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP does not work
 	ClearKeyers();
+	AddDefaultKeyer();
 }
 
 void DownstreamKeyerDock::Load(obs_data_t *data)
@@ -95,10 +105,14 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 	if (outputChannel < 7)
 		outputChannel = 7;
 	ClearKeyers();
-	obs_data_array_t * keyers = obs_data_get_array(data, "downstream_keyers");
+	obs_data_array_t *keyers =
+		obs_data_get_array(data, "downstream_keyers");
 	if (keyers) {
 		auto count = obs_data_array_count(keyers);
-		for (size_t i= 0; i<count;i++) {
+		if (count == 0) {
+			AddDefaultKeyer();
+		}
+		for (size_t i = 0; i < count; i++) {
 			auto keyerData = obs_data_array_item(keyers, i);
 			auto keyer = new DownstreamKeyer(outputChannel + i);
 			keyer->Load(keyerData);
@@ -106,12 +120,13 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 			obs_data_release(keyerData);
 		}
 		obs_data_array_release(keyers);
-	}else {
-		mainLayout->addWidget(new DownstreamKeyer(outputChannel));
+	} else {
+		AddDefaultKeyer();
 	}
 }
 
-void DownstreamKeyerDock::ClearKeyers() {
+void DownstreamKeyerDock::ClearKeyers()
+{
 	while (mainLayout->count()) {
 		QLayoutItem *item = mainLayout->itemAt(0);
 		auto w = dynamic_cast<DownstreamKeyer *>(item->widget());
@@ -119,4 +134,9 @@ void DownstreamKeyerDock::ClearKeyers() {
 		delete item;
 		delete w;
 	}
+}
+
+void DownstreamKeyerDock::AddDefaultKeyer()
+{
+	mainLayout->addWidget(new DownstreamKeyer(outputChannel));
 }

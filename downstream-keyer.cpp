@@ -327,10 +327,11 @@ void DownstreamKeyer::Save(obs_data_t *data)
 		obs_data_release(sceneData);
 	}
 	obs_data_set_array(data, "scenes", sceneArray);
-	obs_data_set_string(data, "scene",
-			    scenesList->currentItem()
-				    ? QT_TO_UTF8(scenesList->currentItem()->text())
-				    : "");
+	obs_data_set_string(
+		data, "scene",
+		scenesList->currentItem()
+			? QT_TO_UTF8(scenesList->currentItem()->text())
+			: "");
 	obs_data_array_release(sceneArray);
 }
 

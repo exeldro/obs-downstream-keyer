@@ -9,7 +9,6 @@ private:
 	QVBoxLayout *mainLayout;
 	int outputChannel;
 
-	void ClearKeyers();
 private slots:
 
 public:
@@ -18,4 +17,6 @@ public:
 
 	void Save(obs_data_t *data);
 	void Load(obs_data_t *data);
+	void ClearKeyers();
+	void AddDefaultKeyer();
 };

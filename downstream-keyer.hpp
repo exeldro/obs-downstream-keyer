@@ -13,10 +13,10 @@ class DownstreamKeyer : public QWidget {
 private:
 	int outputChannel;
 	QLineEdit *name;
-	QListWidget * scenesList;
+	QListWidget *scenesList;
 	obs_source_t *transition;
-	QComboBox * transitionList;
-	QSpinBox * transitionDuration;
+	QComboBox *transitionList;
+	QSpinBox *transitionDuration;
 
 	void ChangeSceneIndex(bool relative, int idx, int invalidIdx);
 private slots:
@@ -28,7 +28,7 @@ private slots:
 	void on_scenesList_currentItemChanged(QListWidgetItem *current,
 					      QListWidgetItem *prev);
 	void on_transitionList_currentIndexChanged(int);
-	signals:
+signals:
 
 public:
 	DownstreamKeyer(int channel);
