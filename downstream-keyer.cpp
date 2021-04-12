@@ -19,12 +19,12 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 	layout->setSpacing(0);
 	layout->setContentsMargins(0, 0, 0, 0);
 
-	name = new QLineEdit();
-	name->setObjectName(QStringLiteral("name"));
-	name->setText("Downstream Keyer 1");
+	nameEdit = new QLineEdit();
+	nameEdit->setObjectName(QStringLiteral("name"));
+	nameEdit->setText("Downstream Keyer 1");
 	//name->setMinimumSize(QSize(0, 22));
 	//name->setMaximumSize(QSize(16777215, 22));
-	layout->addWidget(name);
+	layout->addWidget(nameEdit);
 
 	transitionList = new QComboBox();
 
@@ -36,7 +36,7 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 	auto horizontalLayout = new QHBoxLayout();
 	horizontalLayout->setSpacing(4);
 	horizontalLayout->setObjectName(QStringLiteral("horizontalLayout_3"));
-	auto transitionDurationLabel = new QLabel(this);
+	transitionDurationLabel = new QLabel(this);
 	transitionDurationLabel->setObjectName(
 		QStringLiteral("transitionDurationLabel"));
 	transitionDurationLabel->setText("Duration");
@@ -80,7 +80,7 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 
 	layout->addWidget(scenesList);
 
-	auto scenesToolbar = new QToolBar(this);
+	scenesToolbar = new QToolBar(this);
 	scenesToolbar->setObjectName(QStringLiteral("scenesToolbar"));
 	scenesToolbar->setIconSize(QSize(16, 16));
 	scenesToolbar->setFloatable(false);
@@ -154,6 +154,12 @@ DownstreamKeyer::~DownstreamKeyer()
 		obs_transition_clear(transition);
 		obs_source_release(transition);
 	}
+	delete scenesList;
+	delete transitionList;
+	delete nameEdit;
+	delete transitionDuration;
+	delete transitionDurationLabel;
+	delete scenesToolbar;
 }
 
 void DownstreamKeyer::on_actionAddScene_triggered()
@@ -310,7 +316,7 @@ void DownstreamKeyer::on_transitionList_currentIndexChanged(int)
 
 void DownstreamKeyer::Save(obs_data_t *data)
 {
-	obs_data_set_string(data, "name", QT_TO_UTF8(name->text()));
+	obs_data_set_string(data, "name", QT_TO_UTF8(nameEdit->text()));
 	obs_data_set_string(data, "transition",
 			    QT_TO_UTF8(transitionList->currentText()));
 	obs_data_set_int(data, "transition_duration",
@@ -337,7 +343,7 @@ void DownstreamKeyer::Save(obs_data_t *data)
 
 void DownstreamKeyer::Load(obs_data_t *data)
 {
-	name->setText(QT_UTF8(obs_data_get_string(data, "name")));
+	nameEdit->setText(QT_UTF8(obs_data_get_string(data, "name")));
 
 	transitionList->clear();
 	transitionList->addItem("");
@@ -373,4 +379,24 @@ void DownstreamKeyer::Load(obs_data_t *data)
 		}
 		obs_data_array_release(sceneArray);
 	}
+}
+
+void DownstreamKeyer::UpdateTransitions()
+{
+	QString text = transitionList->currentText();
+	transitionList->blockSignals(true);
+	transitionList->clear();
+	transitionList->addItem("");
+	obs_frontend_source_list transitions = {0};
+	obs_frontend_get_transitions(&transitions);
+	for (size_t i = 0; i < transitions.sources.num; i++) {
+		const char *n =
+			obs_source_get_name(transitions.sources.array[i]);
+		if (!n)
+			continue;
+		transitionList->addItem(QT_UTF8(n));
+	}
+	obs_frontend_source_list_free(&transitions);
+	transitionList->setCurrentText(text);
+	transitionList->blockSignals(false);
 }

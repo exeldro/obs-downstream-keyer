@@ -64,8 +64,11 @@ static void frontend_event(enum obs_frontend_event event, void *data)
 			downstreamKeyerDock->loadedBeforeSwitchSceneCollection =
 				false;
 		}
+		downstreamKeyerDock->UpdateTransitions();
 	} else if (event == OBS_FRONTEND_EVENT_EXIT) {
 		downstreamKeyerDock->ClearKeyers();
+	} else if (event == OBS_FRONTEND_EVENT_TRANSITION_LIST_CHANGED) {
+		downstreamKeyerDock->UpdateTransitions();
 	}
 }
 
@@ -152,4 +155,14 @@ void DownstreamKeyerDock::ClearKeyers()
 void DownstreamKeyerDock::AddDefaultKeyer()
 {
 	mainLayout->addWidget(new DownstreamKeyer(outputChannel));
+}
+
+void DownstreamKeyerDock::UpdateTransitions()
+{
+	int count = mainLayout->count();
+	for (int i = 0; i < count; i++) {
+		QLayoutItem *item = mainLayout->itemAt(i);
+		auto w = dynamic_cast<DownstreamKeyer *>(item->widget());
+		w->UpdateTransitions();
+	}
 }

@@ -1,8 +1,10 @@
 #pragma once
 
 #include <qcombobox.h>
+#include <qlabel.h>
 #include <qlistwidget.h>
 #include <qspinbox.h>
+#include <qtoolbar.h>
 #include <QWidget>
 
 #include "obs.h"
@@ -12,11 +14,13 @@ class DownstreamKeyer : public QWidget {
 
 private:
 	int outputChannel;
-	QLineEdit *name;
-	QListWidget *scenesList;
 	obs_source_t *transition;
+	QLineEdit *nameEdit;
+	QListWidget *scenesList;
 	QComboBox *transitionList;
 	QSpinBox *transitionDuration;
+	QLabel * transitionDurationLabel;
+	QToolBar * scenesToolbar;
 
 	void ChangeSceneIndex(bool relative, int idx, int invalidIdx);
 private slots:
@@ -36,4 +40,5 @@ public:
 
 	void Save(obs_data_t *data);
 	void Load(obs_data_t *data);
+	void UpdateTransitions();
 };

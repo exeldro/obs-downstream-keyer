@@ -108,7 +108,6 @@ static void output_source_video_tick(void *data, float seconds)
 	obs_source_t *source = obs_get_output_source(context->channel);
 	if (!source) {
 		if (context->outputSource) {
-			obs_source_release(context->outputSource);
 			context->outputSource = NULL;
 			context->recurring = false;
 		}
