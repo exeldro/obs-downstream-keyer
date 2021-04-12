@@ -12,8 +12,12 @@ OBS_DECLARE_MODULE()
 OBS_MODULE_AUTHOR("Exeldro");
 OBS_MODULE_USE_DEFAULT_LOCALE("media-controls", "en-US")
 
+MODULE_EXTERN struct obs_source_info output_source_info;
+
 bool obs_module_load()
 {
+
+	obs_register_source(&output_source_info);
 	const auto main_window =
 		static_cast<QMainWindow *>(obs_frontend_get_main_window());
 	obs_frontend_push_ui_translation(obs_module_get_string);
@@ -56,10 +60,12 @@ static void frontend_event(enum obs_frontend_event event, void *data)
 		if (!downstreamKeyerDock->loadedBeforeSwitchSceneCollection) {
 			downstreamKeyerDock->ClearKeyers();
 			downstreamKeyerDock->AddDefaultKeyer();
-		}else {
+		} else {
 			downstreamKeyerDock->loadedBeforeSwitchSceneCollection =
 				false;
 		}
+	} else if (event == OBS_FRONTEND_EVENT_EXIT) {
+		downstreamKeyerDock->ClearKeyers();
 	}
 }
 

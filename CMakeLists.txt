@@ -1,4 +1,4 @@
-project(downstream-keyer VERSION 0.0.2)
+project(downstream-keyer VERSION 0.0.3)
 set(PROJECT_FULL_NAME "Downstream keyer")
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
@@ -9,7 +9,8 @@ set(downstream-keyer_HEADERS
 	version.h)
 set(downstream-keyer_SOURCES
 	downstream-keyer-dock.cpp
-	downstream-keyer.cpp)
+	downstream-keyer.cpp
+	output-source.c)
 
 if(WIN32)
 	get_filename_component(ISS_FILES_DIR "${CMAKE_BINARY_DIR}\\..\\package" ABSOLUTE)
