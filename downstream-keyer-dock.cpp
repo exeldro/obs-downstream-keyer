@@ -39,7 +39,8 @@ MODULE_EXPORT const char *obs_module_name(void)
 	return obs_module_text("DownstreamKeyer");
 }
 
-static void frontend_save_load(obs_data_t *save_data, bool saving, void *data)
+void DownstreamKeyerDock::frontend_save_load(obs_data_t *save_data,
+						    bool saving, void *data)
 {
 	auto downstreamKeyerDock = static_cast<DownstreamKeyerDock *>(data);
 	if (saving) {
@@ -49,7 +50,8 @@ static void frontend_save_load(obs_data_t *save_data, bool saving, void *data)
 	}
 }
 
-static void frontend_event(enum obs_frontend_event event, void *data)
+void DownstreamKeyerDock::frontend_event(enum obs_frontend_event event,
+						void *data)
 {
 	auto downstreamKeyerDock = static_cast<DownstreamKeyerDock *>(data);
 	if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP) {

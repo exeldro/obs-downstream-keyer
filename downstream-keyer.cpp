@@ -144,6 +144,10 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 	layout->addItem(new QSpacerItem(150, 0, QSizePolicy::Fixed,
 					QSizePolicy::Minimum));
 
+	const auto sh = obs_get_signal_handler();
+	signal_handler_connect(sh, "source_rename", source_rename, this);
+	signal_handler_connect(sh, "source_remove", source_remove, this);
+
 	setLayout(layout);
 }
 
@@ -153,6 +157,11 @@ DownstreamKeyer::~DownstreamKeyer()
 	if (transition) {
 		obs_transition_clear(transition);
 		obs_source_release(transition);
+	}
+	while (scenesList->count()) {
+		const auto item = scenesList->item(0);
+		scenesList->removeItemWidget(item);
+		delete item;
 	}
 	delete scenesList;
 	delete transitionList;
@@ -369,8 +378,7 @@ void DownstreamKeyer::Load(obs_data_t *data)
 		for (size_t i = 0; i < count; i++) {
 			auto sceneData = obs_data_array_item(sceneArray, i);
 			auto item = new QListWidgetItem(
-				QT_UTF8(obs_data_get_string(sceneData, "name")),
-				scenesList);
+				QT_UTF8(obs_data_get_string(sceneData, "name")));
 			scenesList->addItem(item);
 			if (item->text() == sceneName) {
 				scenesList->setCurrentItem(item);
@@ -399,4 +407,33 @@ void DownstreamKeyer::UpdateTransitions()
 	obs_frontend_source_list_free(&transitions);
 	transitionList->setCurrentText(text);
 	transitionList->blockSignals(false);
+}
+
+void DownstreamKeyer::source_rename(void *data, calldata_t *calldata)
+{
+	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
+	const auto newName = QT_UTF8(calldata_string(calldata, "new_name"));
+	const auto prevName = QT_UTF8(calldata_string(calldata, "prev_name"));
+	const auto count = downstreamKeyer->scenesList->count();
+	for (int i = 0; i < count; i++) {
+		const auto item = downstreamKeyer->scenesList->item(i);
+		if (item->text() == prevName)
+			item->setText(newName);
+	}
+}
+
+void DownstreamKeyer::source_remove(void *data, calldata_t *calldata)
+{
+	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
+	const auto name = QT_UTF8(obs_source_get_name(
+		static_cast<obs_source_t *>(calldata_ptr(calldata, "source"))));
+
+	const auto count = downstreamKeyer->scenesList->count();
+	for (int i = count - 1; i >= 0; i--) {
+		const auto item = downstreamKeyer->scenesList->item(i);
+		if (item->text() == name) {
+			downstreamKeyer->scenesList->removeItemWidget(item);
+			delete item;
+		}
+	}
 }

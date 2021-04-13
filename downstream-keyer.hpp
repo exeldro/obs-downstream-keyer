@@ -22,6 +22,9 @@ private:
 	QLabel * transitionDurationLabel;
 	QToolBar * scenesToolbar;
 
+	static void source_rename(void *data, calldata_t *calldata);
+	static void source_remove(void *data, calldata_t *calldata);
+
 	void ChangeSceneIndex(bool relative, int idx, int invalidIdx);
 private slots:
 	void on_actionAddScene_triggered();
