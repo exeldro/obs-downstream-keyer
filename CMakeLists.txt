@@ -1,4 +1,4 @@
-project(downstream-keyer VERSION 0.0.5)
+project(downstream-keyer VERSION 0.1.0)
 set(PROJECT_FULL_NAME "Downstream keyer")
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
@@ -6,10 +6,12 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in ${CMAKE_CURRENT_SOURCE_D
 set(downstream-keyer_HEADERS
 	downstream-keyer-dock.hpp
 	downstream-keyer.hpp
+	name-dialog.hpp
 	version.h)
 set(downstream-keyer_SOURCES
 	downstream-keyer-dock.cpp
 	downstream-keyer.cpp
+	name-dialog.cpp
 	output-source.c)
 
 if(WIN32)

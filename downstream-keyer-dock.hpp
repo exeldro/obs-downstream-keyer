@@ -1,12 +1,13 @@
 #pragma once
 #include <QDockWidget>
+#include <QTabWidget>
 #include <QVBoxLayout>
 #include <../UI/obs-frontend-api/obs-frontend-api.h>
 
 class DownstreamKeyerDock : public QDockWidget {
 	Q_OBJECT
 private:
-	QVBoxLayout *mainLayout;
+	QTabWidget *tabs;
 	int outputChannel;
 	bool loadedBeforeSwitchSceneCollection;
 
@@ -18,10 +19,13 @@ private:
 	void Load(obs_data_t *data);
 	void ClearKeyers();
 	void AddDefaultKeyer();
-	void UpdateTransitions();
+	void ConfigClicked();
 private slots:
+	void Add();
+	void Rename();
+	void Remove();
 
 public:
 	DownstreamKeyerDock(QWidget *parent = nullptr);
-	~DownstreamKeyerDock();	
+	~DownstreamKeyerDock();
 };

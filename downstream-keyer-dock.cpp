@@ -1,9 +1,13 @@
 #include "downstream-keyer-dock.hpp"
 #include <obs-module.h>
 #include <QMainWindow>
+#include <QMenu>
+#include <QPushButton>
 #include <QVBoxLayout>
+#include <QWidgetAction>
 
 #include "downstream-keyer.hpp"
+#include "name-dialog.hpp"
 
 #define QT_UTF8(str) QString::fromUtf8(str)
 #define QT_TO_UTF8(str) str.toUtf8().constData()
@@ -16,13 +20,11 @@ MODULE_EXTERN struct obs_source_info output_source_info;
 
 bool obs_module_load()
 {
-
 	obs_register_source(&output_source_info);
 	const auto main_window =
 		static_cast<QMainWindow *>(obs_frontend_get_main_window());
 	obs_frontend_push_ui_translation(obs_module_get_string);
-	auto downstreamKeyerDock = new DownstreamKeyerDock(main_window);
-	obs_frontend_add_dock(downstreamKeyerDock);
+	obs_frontend_add_dock(new DownstreamKeyerDock(main_window));
 	obs_frontend_pop_ui_translation();
 	return true;
 }
@@ -39,8 +41,8 @@ MODULE_EXPORT const char *obs_module_name(void)
 	return obs_module_text("DownstreamKeyer");
 }
 
-void DownstreamKeyerDock::frontend_save_load(obs_data_t *save_data,
-						    bool saving, void *data)
+void DownstreamKeyerDock::frontend_save_load(obs_data_t *save_data, bool saving,
+					     void *data)
 {
 	auto downstreamKeyerDock = static_cast<DownstreamKeyerDock *>(data);
 	if (saving) {
@@ -51,7 +53,7 @@ void DownstreamKeyerDock::frontend_save_load(obs_data_t *save_data,
 }
 
 void DownstreamKeyerDock::frontend_event(enum obs_frontend_event event,
-						void *data)
+					 void *data)
 {
 	auto downstreamKeyerDock = static_cast<DownstreamKeyerDock *>(data);
 	if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP) {
@@ -66,27 +68,29 @@ void DownstreamKeyerDock::frontend_event(enum obs_frontend_event event,
 			downstreamKeyerDock->loadedBeforeSwitchSceneCollection =
 				false;
 		}
-		downstreamKeyerDock->UpdateTransitions();
 	} else if (event == OBS_FRONTEND_EVENT_EXIT) {
 		downstreamKeyerDock->ClearKeyers();
-	} else if (event == OBS_FRONTEND_EVENT_TRANSITION_LIST_CHANGED) {
-		downstreamKeyerDock->UpdateTransitions();
 	}
 }
 
 DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent) : QDockWidget(parent)
 {
+	setFeatures(DockWidgetMovable | DockWidgetFloatable);
 	setWindowTitle(QT_UTF8(obs_module_text("DownstreamKeyer")));
 	setObjectName("DownstreamKeyerDock");
 	setFloating(true);
 	hide();
-	mainLayout = new QVBoxLayout(this);
-	mainLayout->setSpacing(0);
-	mainLayout->setContentsMargins(0, 0, 0, 0);
+	tabs = new QTabWidget(this);
+	tabs->setMovable(true);
 
-	auto *dockWidgetContents = new QWidget;
-	dockWidgetContents->setLayout(mainLayout);
-	setWidget(dockWidgetContents);
+	auto config = new QPushButton(this);
+	config->setProperty("themeID", "configIconSmall");
+
+	connect(config, &QAbstractButton::clicked, this,
+		&DownstreamKeyerDock::ConfigClicked);
+
+	tabs->setCornerWidget(config);
+	setWidget(tabs);
 
 	obs_frontend_add_save_callback(frontend_save_load, this);
 	obs_frontend_add_event_callback(frontend_event, this);
@@ -103,11 +107,12 @@ void DownstreamKeyerDock::Save(obs_data_t *data)
 {
 	obs_data_set_int(data, "downstream_keyers_channel", outputChannel);
 	obs_data_array_t *keyers = obs_data_array_create();
-	int count = mainLayout->count();
+	int count = tabs->count();
 	for (int i = 0; i < count; i++) {
-		QLayoutItem *item = mainLayout->itemAt(i);
-		auto w = dynamic_cast<DownstreamKeyer *>(item->widget());
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
 		const auto keyerData = obs_data_create();
+		obs_data_set_string(keyerData, "name",
+				    QT_TO_UTF8(tabs->tabText(i)));
 		w->Save(keyerData);
 		obs_data_array_push_back(keyers, keyerData);
 		obs_data_release(keyerData);
@@ -133,7 +138,8 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 			auto keyerData = obs_data_array_item(keyers, i);
 			auto keyer = new DownstreamKeyer(outputChannel + i);
 			keyer->Load(keyerData);
-			mainLayout->addWidget(keyer);
+			tabs->addTab(keyer,
+				     obs_data_get_string(keyerData, "name"));
 			obs_data_release(keyerData);
 		}
 		obs_data_array_release(keyers);
@@ -145,26 +151,119 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 
 void DownstreamKeyerDock::ClearKeyers()
 {
-	while (mainLayout->count()) {
-		QLayoutItem *item = mainLayout->itemAt(0);
-		auto w = dynamic_cast<DownstreamKeyer *>(item->widget());
-		mainLayout->removeItem(item);
-		delete item;
+	while (tabs->count()) {
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(0));
+		tabs->removeTab(0);
 		delete w;
 	}
 }
 
 void DownstreamKeyerDock::AddDefaultKeyer()
 {
-	mainLayout->addWidget(new DownstreamKeyer(outputChannel));
+	tabs->addTab(new DownstreamKeyer(outputChannel),
+		     QT_UTF8(obs_module_text("DefaultName")));
 }
 
-void DownstreamKeyerDock::UpdateTransitions()
+void DownstreamKeyerDock::ConfigClicked()
 {
-	int count = mainLayout->count();
-	for (int i = 0; i < count; i++) {
-		QLayoutItem *item = mainLayout->itemAt(i);
-		auto w = dynamic_cast<DownstreamKeyer *>(item->widget());
-		w->UpdateTransitions();
+	QMenu popup;
+	auto *a = popup.addAction(QT_UTF8(obs_module_text("Add")));
+	connect(a, SIGNAL(triggered()), this, SLOT(Add()));
+	a = popup.addAction(QT_UTF8(obs_module_text("Rename")));
+	connect(a, SIGNAL(triggered()), this, SLOT(Rename()));
+	a = popup.addAction(QT_UTF8(obs_module_text("Remove")));
+	connect(a, SIGNAL(triggered()), this, SLOT(Remove()));
+	std::string transition = "";
+	int transition_duration = 300;
+	auto w = dynamic_cast<DownstreamKeyer *>(tabs->currentWidget());
+	if (w) {
+		transition = w->GetTransition();
+		transition_duration = w->GetTransitionDuration();
+	}
+
+	auto setTransition = [this](std::string name) {
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->currentWidget());
+		if (w) {
+			w->SetTransition(name.c_str());
+		}
+	};
+
+	auto tm = popup.addMenu(QT_UTF8(obs_module_text("Transition")));
+	a = tm->addAction(QT_UTF8(obs_module_text("None")));
+	a->setCheckable(true);
+	a->setChecked(transition.empty());
+	connect(a, &QAction::triggered,
+		[setTransition] { return setTransition(""); });
+	tm->addSeparator();
+	obs_frontend_source_list transitions = {0};
+	obs_frontend_get_transitions(&transitions);
+	for (size_t i = 0; i < transitions.sources.num; i++) {
+		const char *n =
+			obs_source_get_name(transitions.sources.array[i]);
+		if (!n)
+			continue;
+		a = tm->addAction(QT_UTF8(n));
+		a->setCheckable(true);
+		a->setChecked(strcmp(transition.c_str(), n) == 0);
+		connect(a, &QAction::triggered,
+			[setTransition, n] { return setTransition(n); });
+	}
+	obs_frontend_source_list_free(&transitions);
+
+	tm->addSeparator();
+
+	QSpinBox *duration = new QSpinBox(tm);
+	duration->setMinimum(50);
+	duration->setSuffix("ms");
+	duration->setMaximum(20000);
+	duration->setSingleStep(50);
+	duration->setValue(transition_duration);
+
+	auto setDuration = [this](int duration) {
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->currentWidget());
+		if (w) {
+			w->SetTransitionDuration(duration);
+		}
+	};
+	connect(duration, (void (QSpinBox::*)(int)) & QSpinBox::valueChanged,
+		setDuration);
+
+	QWidgetAction *durationAction = new QWidgetAction(tm);
+	durationAction->setDefaultWidget(duration);
+
+	tm->addAction(durationAction);
+
+	popup.exec(QCursor::pos());
+}
+
+void DownstreamKeyerDock::Add()
+{
+	std::string name = "";
+	if (NameDialog::AskForName(this, name)) {
+		tabs->addTab(new DownstreamKeyer(outputChannel + tabs->count()),
+			     QT_UTF8(name.c_str()));
+	}
+}
+void DownstreamKeyerDock::Rename()
+{
+	int i = tabs->currentIndex();
+	if (i < 0)
+		return;
+	std::string name = QT_TO_UTF8(tabs->tabText(i));
+	if (NameDialog::AskForName(this, name)) {
+		tabs->setTabText(i, QT_UTF8(name.c_str()));
+	}
+}
+
+void DownstreamKeyerDock::Remove()
+{
+	int i = tabs->currentIndex();
+	if (i < 0)
+		return;
+	auto w = tabs->widget(i);
+	tabs->removeTab(i);
+	delete w;
+	if (tabs->count() == 0) {
+		AddDefaultKeyer();
 	}
 }

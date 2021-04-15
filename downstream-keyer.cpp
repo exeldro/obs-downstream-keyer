@@ -4,57 +4,23 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPushButton>
 #include <QSpinBox>
 #include <QToolBar>
 #include <QVBoxLayout>
 #include <../UI/obs-frontend-api/obs-frontend-api.h>
 
+#include "obs-module.h"
+
 #define QT_UTF8(str) QString::fromUtf8(str)
 #define QT_TO_UTF8(str) str.toUtf8().constData()
 
 DownstreamKeyer::DownstreamKeyer(int channel)
-	: outputChannel(channel), transition(nullptr)
+	: outputChannel(channel), transition(nullptr), transitionDuration(300)
 {
 	auto layout = new QVBoxLayout(this);
 	layout->setSpacing(0);
 	layout->setContentsMargins(0, 0, 0, 0);
-
-	nameEdit = new QLineEdit();
-	nameEdit->setObjectName(QStringLiteral("name"));
-	nameEdit->setText("Downstream Keyer 1");
-	//name->setMinimumSize(QSize(0, 22));
-	//name->setMaximumSize(QSize(16777215, 22));
-	layout->addWidget(nameEdit);
-
-	transitionList = new QComboBox();
-
-	connect(transitionList, SIGNAL(currentIndexChanged(int)), this,
-		SLOT(on_transitionList_currentIndexChanged(int)));
-
-	layout->addWidget(transitionList);
-
-	auto horizontalLayout = new QHBoxLayout();
-	horizontalLayout->setSpacing(4);
-	horizontalLayout->setObjectName(QStringLiteral("horizontalLayout_3"));
-	transitionDurationLabel = new QLabel(this);
-	transitionDurationLabel->setObjectName(
-		QStringLiteral("transitionDurationLabel"));
-	transitionDurationLabel->setText("Duration");
-
-	horizontalLayout->addWidget(transitionDurationLabel);
-
-	transitionDuration = new QSpinBox(this);
-	transitionDuration->setObjectName(QStringLiteral("transitionDuration"));
-	transitionDuration->setMinimum(50);
-	transitionDuration->setMaximum(20000);
-	transitionDuration->setSingleStep(50);
-	transitionDuration->setValue(300);
-
-	horizontalLayout->addWidget(transitionDuration);
-
-	transitionDurationLabel->setBuddy(transitionDuration);
-
-	layout->addLayout(horizontalLayout);
 
 	scenesList = new QListWidget(this);
 	scenesList->setObjectName(QStringLiteral("scenes"));
@@ -72,11 +38,9 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 	scenesList->setDragDropMode(QAbstractItemView::InternalMove);
 	scenesList->setDefaultDropAction(Qt::TargetMoveAction);
 	connect(scenesList,
-		SIGNAL(currentItemChanged(QListWidgetItem *,
-					  QListWidgetItem *)),
+		SIGNAL(itemSelectionChanged()),
 		this,
-		SLOT(on_scenesList_currentItemChanged(QListWidgetItem *,
-						      QListWidgetItem *)));
+		SLOT(on_scenesList_itemSelectionChanged()));
 
 	layout->addWidget(scenesList);
 
@@ -88,7 +52,7 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 	auto actionAddScene = new QAction(this);
 	actionAddScene->setObjectName(QStringLiteral("actionAddScene"));
 	actionAddScene->setProperty("themeID", "addIconSmall");
-	actionAddScene->setText("Add");
+	actionAddScene->setText(QT_UTF8(obs_module_text("Add")));
 	connect(actionAddScene, SIGNAL(triggered()), this,
 		SLOT(on_actionAddScene_triggered()));
 	scenesToolbar->addAction(actionAddScene);
@@ -97,7 +61,7 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 	actionRemoveScene->setObjectName(QStringLiteral("actionRemoveScene"));
 	actionRemoveScene->setShortcutContext(Qt::WidgetWithChildrenShortcut);
 	actionRemoveScene->setProperty("themeID", "removeIconSmall");
-	actionRemoveScene->setText("Remove");
+	actionRemoveScene->setText(QT_UTF8(obs_module_text("Remove")));
 	connect(actionRemoveScene, SIGNAL(triggered()), this,
 		SLOT(on_actionRemoveScene_triggered()));
 	scenesToolbar->addAction(actionRemoveScene);
@@ -107,7 +71,7 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 	auto actionSceneUp = new QAction(this);
 	actionSceneUp->setObjectName(QStringLiteral("actionSceneUp"));
 	actionSceneUp->setProperty("themeID", "upArrowIconSmall");
-	actionSceneUp->setText("Move up");
+	actionSceneUp->setText(QT_UTF8(obs_module_text("MoveUp")));
 	connect(actionSceneUp, SIGNAL(triggered()), this,
 		SLOT(on_actionSceneUp_triggered()));
 	scenesToolbar->addAction(actionSceneUp);
@@ -115,7 +79,7 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 	auto actionSceneDown = new QAction(this);
 	actionSceneDown->setObjectName(QStringLiteral("actionSceneDown"));
 	actionSceneDown->setProperty("themeID", "downArrowIconSmall");
-	actionSceneDown->setText("Move down");
+	actionSceneDown->setText(QT_UTF8(obs_module_text("MoveDown")));
 	connect(actionSceneDown, SIGNAL(triggered()), this,
 		SLOT(on_actionSceneDown_triggered()));
 	scenesToolbar->addAction(actionSceneDown);
@@ -125,7 +89,7 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 	auto actionSceneNull = new QAction(this);
 	actionSceneNull->setObjectName(QStringLiteral("actionSceneNull"));
 	actionSceneNull->setProperty("themeID", "pauseIconSmall");
-	actionSceneNull->setText("No scene");
+	actionSceneNull->setText(QT_UTF8(obs_module_text("None")));
 	connect(actionSceneNull, SIGNAL(triggered()), this,
 		SLOT(on_actionSceneNull_triggered()));
 	scenesToolbar->addAction(actionSceneNull);
@@ -157,17 +121,17 @@ DownstreamKeyer::~DownstreamKeyer()
 	if (transition) {
 		obs_transition_clear(transition);
 		obs_source_release(transition);
+		transition = nullptr;
 	}
+	const auto sh = obs_get_signal_handler();
+	signal_handler_disconnect(sh, "source_rename", source_rename, this);
+	signal_handler_disconnect(sh, "source_remove", source_remove, this);
 	while (scenesList->count()) {
 		const auto item = scenesList->item(0);
 		scenesList->removeItemWidget(item);
 		delete item;
 	}
 	delete scenesList;
-	delete transitionList;
-	delete nameEdit;
-	delete transitionDuration;
-	delete transitionDurationLabel;
 	delete scenesToolbar;
 }
 
@@ -207,23 +171,25 @@ void DownstreamKeyer::on_actionSceneDown_triggered()
 
 void DownstreamKeyer::on_actionSceneNull_triggered()
 {
+	for (int i = 0; i< scenesList->count();i++) {
+		auto item = scenesList->item(i);
+		item->setSelected(false);
+	}
 	scenesList->setCurrentRow(-1);
 }
 
-void DownstreamKeyer::on_scenesList_currentItemChanged(QListWidgetItem *current,
-						       QListWidgetItem *prev)
+void DownstreamKeyer::on_scenesList_itemSelectionChanged()
 {
-	auto currentSource =
-		current ? obs_get_source_by_name(QT_TO_UTF8(current->text()))
+
+	auto l = scenesList->selectedItems();
+	auto currentSource = l.count()? obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text()))
 			: nullptr;
 	if (transition) {
-		auto prevSource =
-			prev ? obs_get_source_by_name(QT_TO_UTF8(prev->text()))
-			     : nullptr;
+		auto prevSource = obs_transition_get_active_source(transition);
 		obs_transition_set(transition, prevSource);
+
 		obs_transition_start(transition, OBS_TRANSITION_MODE_AUTO,
-				     transitionDuration->value(),
-				     currentSource);
+				     transitionDuration, currentSource);
 
 		if (obs_get_output_source(outputChannel) != transition) {
 			obs_set_output_source(outputChannel, transition);
@@ -253,83 +219,10 @@ void DownstreamKeyer::ChangeSceneIndex(bool relative, int offset,
 	scenesList->blockSignals(false);
 }
 
-void DownstreamKeyer::on_transitionList_currentIndexChanged(int)
-{
-	auto oldTransitionName = obs_source_get_name(transition);
-	obs_source_t *oldTransition = transition;
-	obs_source_t *newTransition = nullptr;
-	if (!transitionList->currentText().isEmpty()) {
-		obs_frontend_source_list transitions = {0};
-		obs_frontend_get_transitions(&transitions);
-		for (size_t i = 0; i < transitions.sources.num; i++) {
-			const char *n = obs_source_get_name(
-				transitions.sources.array[i]);
-			if (!n)
-				continue;
-			if (strcmp(n,
-				   QT_TO_UTF8(transitionList->currentText())) ==
-			    0) {
-				newTransition = transitions.sources.array[i];
-				break;
-			}
-		}
-		obs_frontend_source_list_free(&transitions);
-	}
-	if (!newTransition) {
-		auto item = scenesList->currentItem();
-		if (item) {
-			auto scene = obs_get_source_by_name(
-				QT_TO_UTF8(item->text()));
-			obs_set_output_source(outputChannel, scene);
-			obs_source_release(scene);
-		} else {
-			obs_set_output_source(outputChannel, nullptr);
-		}
-		if (transition) {
-			transition = nullptr;
-			obs_transition_clear(oldTransition);
-			obs_source_release(oldTransition);
-		}
-		return;
-	}
-	if (oldTransitionName &&
-	    strcmp(oldTransitionName, obs_source_get_name(newTransition)) ==
-		    0) {
-		obs_source_release(newTransition);
-		return;
-	}
-	obs_source_t *newTransitionCopy = obs_source_duplicate(
-		newTransition, obs_source_get_name(newTransition), true);
-
-	if (oldTransition) {
-		obs_transition_swap_begin(newTransitionCopy, oldTransition);
-		obs_set_output_source(outputChannel, newTransitionCopy);
-		transition = newTransitionCopy;
-		obs_transition_swap_end(newTransitionCopy, oldTransition);
-		obs_transition_clear(oldTransition);
-		obs_source_release(oldTransition);
-	} else {
-		auto item = scenesList->currentItem();
-		if (item) {
-			auto scene = obs_get_source_by_name(
-				QT_TO_UTF8(item->text()));
-			obs_transition_set(newTransitionCopy, scene);
-			obs_source_release(scene);
-		} else {
-			obs_transition_set(newTransitionCopy, nullptr);
-		}
-		obs_set_output_source(outputChannel, newTransitionCopy);
-		transition = newTransitionCopy;
-	}
-}
-
 void DownstreamKeyer::Save(obs_data_t *data)
 {
-	obs_data_set_string(data, "name", QT_TO_UTF8(nameEdit->text()));
-	obs_data_set_string(data, "transition",
-			    QT_TO_UTF8(transitionList->currentText()));
-	obs_data_set_int(data, "transition_duration",
-			 transitionDuration->value());
+	obs_data_set_string(data,"transition", obs_source_get_name(transition));
+	obs_data_set_int(data, "transition_duration", transitionDuration);
 	obs_data_array_t *sceneArray = obs_data_array_create();
 	for (int i = 0; i < scenesList->count(); i++) {
 		auto item = scenesList->item(i);
@@ -350,12 +243,20 @@ void DownstreamKeyer::Save(obs_data_t *data)
 	obs_data_array_release(sceneArray);
 }
 
-void DownstreamKeyer::Load(obs_data_t *data)
+std::string DownstreamKeyer::GetTransition()
 {
-	nameEdit->setText(QT_UTF8(obs_data_get_string(data, "name")));
+	if (!transition)
+		return "";
+	return obs_source_get_name(transition);
+}
 
-	transitionList->clear();
-	transitionList->addItem("");
+void DownstreamKeyer::SetTransition(const char *transition_name)
+{
+	if (!transition && (!transition_name || !strlen(transition_name)))
+		return;
+
+	obs_source_t *oldTransition = transition;
+	obs_source_t *newTransition = nullptr;
 	obs_frontend_source_list transitions = {0};
 	obs_frontend_get_transitions(&transitions);
 	for (size_t i = 0; i < transitions.sources.num; i++) {
@@ -363,22 +264,79 @@ void DownstreamKeyer::Load(obs_data_t *data)
 			obs_source_get_name(transitions.sources.array[i]);
 		if (!n)
 			continue;
-		transitionList->addItem(QT_UTF8(n));
+		if (strcmp(transition_name, n) == 0) {
+			newTransition = obs_source_duplicate(
+				transitions.sources.array[i],
+				obs_source_get_name(
+					transitions.sources.array[i]),
+				true);
+			break;
+		}
 	}
 	obs_frontend_source_list_free(&transitions);
-	transitionList->setCurrentText(
-		QT_UTF8(obs_data_get_string(data, "transition")));
-	transitionDuration->setValue(
-		obs_data_get_int(data, "transition_duration"));
+	if (!newTransition) {
+		auto item = scenesList->currentItem();
+		if (item) {
+			auto scene = obs_get_source_by_name(
+				QT_TO_UTF8(item->text()));
+			obs_set_output_source(outputChannel, scene);
+			obs_source_release(scene);
+		} else {
+			obs_set_output_source(outputChannel, nullptr);
+		}
+		if (transition) {
+			transition = nullptr;
+			obs_transition_clear(oldTransition);
+			obs_source_release(oldTransition);
+		}
+		return;
+	}
+
+	if (oldTransition) {
+		obs_transition_swap_begin(newTransition, oldTransition);
+		obs_set_output_source(outputChannel, newTransition);
+		transition = newTransition;
+		obs_transition_swap_end(newTransition, oldTransition);
+		obs_transition_clear(oldTransition);
+		obs_source_release(oldTransition);
+	} else {
+		auto item = scenesList->currentItem();
+		if (item) {
+			auto scene = obs_get_source_by_name(
+				QT_TO_UTF8(item->text()));
+			obs_transition_set(newTransition, scene);
+			obs_source_release(scene);
+		} else {
+			obs_transition_set(newTransition, nullptr);
+		}
+		obs_set_output_source(outputChannel, newTransition);
+		transition = newTransition;
+	}
+}
+
+void DownstreamKeyer::SetTransitionDuration(int duration)
+{
+	transitionDuration = duration;
+}
+
+int DownstreamKeyer::GetTransitionDuration()
+{
+	return transitionDuration;
+}
+
+void DownstreamKeyer::Load(obs_data_t *data)
+{
+	SetTransition(obs_data_get_string(data, "transition"));
+	transitionDuration = obs_data_get_int(data, "transition_duration");
 	scenesList->clear();
 	obs_data_array_t *sceneArray = obs_data_get_array(data, "scenes");
-	auto sceneName = QT_UTF8(obs_data_get_string(data, "scene"));
+	const auto sceneName = QT_UTF8(obs_data_get_string(data, "scene"));
 	if (sceneArray) {
 		auto count = obs_data_array_count(sceneArray);
 		for (size_t i = 0; i < count; i++) {
 			auto sceneData = obs_data_array_item(sceneArray, i);
-			auto item = new QListWidgetItem(
-				QT_UTF8(obs_data_get_string(sceneData, "name")));
+			auto item = new QListWidgetItem(QT_UTF8(
+				obs_data_get_string(sceneData, "name")));
 			scenesList->addItem(item);
 			if (item->text() == sceneName) {
 				scenesList->setCurrentItem(item);
@@ -387,26 +345,6 @@ void DownstreamKeyer::Load(obs_data_t *data)
 		}
 		obs_data_array_release(sceneArray);
 	}
-}
-
-void DownstreamKeyer::UpdateTransitions()
-{
-	QString text = transitionList->currentText();
-	transitionList->blockSignals(true);
-	transitionList->clear();
-	transitionList->addItem("");
-	obs_frontend_source_list transitions = {0};
-	obs_frontend_get_transitions(&transitions);
-	for (size_t i = 0; i < transitions.sources.num; i++) {
-		const char *n =
-			obs_source_get_name(transitions.sources.array[i]);
-		if (!n)
-			continue;
-		transitionList->addItem(QT_UTF8(n));
-	}
-	obs_frontend_source_list_free(&transitions);
-	transitionList->setCurrentText(text);
-	transitionList->blockSignals(false);
 }
 
 void DownstreamKeyer::source_rename(void *data, calldata_t *calldata)
