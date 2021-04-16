@@ -37,9 +37,7 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 	scenesList->setDragEnabled(true);
 	scenesList->setDragDropMode(QAbstractItemView::InternalMove);
 	scenesList->setDefaultDropAction(Qt::TargetMoveAction);
-	connect(scenesList,
-		SIGNAL(itemSelectionChanged()),
-		this,
+	connect(scenesList, SIGNAL(itemSelectionChanged()), this,
 		SLOT(on_scenesList_itemSelectionChanged()));
 
 	layout->addWidget(scenesList);
@@ -129,6 +127,7 @@ DownstreamKeyer::~DownstreamKeyer()
 	while (scenesList->count()) {
 		const auto item = scenesList->item(0);
 		scenesList->removeItemWidget(item);
+		obs_hotkey_pair_unregister(item->data(Qt::UserRole).toUInt());
 		delete item;
 	}
 	delete scenesList;
@@ -144,7 +143,23 @@ void DownstreamKeyer::on_actionAddScene_triggered()
 	auto sceneName = QT_UTF8(obs_source_get_name(scene));
 	if (scenesList->findItems(sceneName, Qt::MatchFixedString).count() ==
 	    0) {
-		scenesList->addItem(sceneName);
+		const auto item = new QListWidgetItem(sceneName);
+		scenesList->addItem(item);
+
+		std::string enable_hotkey = obs_module_text("EnableDSK");
+		enable_hotkey += " ";
+		enable_hotkey += QT_TO_UTF8(objectName());
+		std::string disable_hotkey = obs_module_text("DisableDSK");
+		disable_hotkey += " ";
+		disable_hotkey += QT_TO_UTF8(objectName());
+		uint64_t h = obs_hotkey_pair_register_source(
+			scene, enable_hotkey.c_str(), enable_hotkey.c_str(),
+			disable_hotkey.c_str(), disable_hotkey.c_str(),
+			enable_DSK_hotkey, disable_DSK_hotkey, this, this);
+
+		if (h != OBS_INVALID_HOTKEY_PAIR_ID) {
+			item->setData(Qt::UserRole, static_cast<uint>(h));
+		}
 	}
 
 	obs_source_release(scene);
@@ -156,6 +171,7 @@ void DownstreamKeyer::on_actionRemoveScene_triggered()
 	if (!item)
 		return;
 	scenesList->removeItemWidget(item);
+	obs_hotkey_pair_unregister(item->data(Qt::UserRole).toUInt());
 	delete item;
 }
 
@@ -171,7 +187,7 @@ void DownstreamKeyer::on_actionSceneDown_triggered()
 
 void DownstreamKeyer::on_actionSceneNull_triggered()
 {
-	for (int i = 0; i< scenesList->count();i++) {
+	for (int i = 0; i < scenesList->count(); i++) {
 		auto item = scenesList->item(i);
 		item->setSelected(false);
 	}
@@ -180,17 +196,21 @@ void DownstreamKeyer::on_actionSceneNull_triggered()
 
 void DownstreamKeyer::on_scenesList_itemSelectionChanged()
 {
-
-	auto l = scenesList->selectedItems();
-	auto currentSource = l.count()? obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text()))
+	const auto l = scenesList->selectedItems();
+	const auto currentSource =
+		l.count()
+			? obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text()))
 			: nullptr;
 	if (transition) {
 		auto prevSource = obs_transition_get_active_source(transition);
-		obs_transition_set(transition, prevSource);
+		if (prevSource != currentSource) {
+			obs_transition_set(transition, prevSource);
 
-		obs_transition_start(transition, OBS_TRANSITION_MODE_AUTO,
-				     transitionDuration, currentSource);
-
+			obs_transition_start(transition,
+					     OBS_TRANSITION_MODE_AUTO,
+					     transitionDuration, currentSource);
+		}
+		obs_source_release(prevSource);
 		if (obs_get_output_source(outputChannel) != transition) {
 			obs_set_output_source(outputChannel, transition);
 		}
@@ -221,7 +241,8 @@ void DownstreamKeyer::ChangeSceneIndex(bool relative, int offset,
 
 void DownstreamKeyer::Save(obs_data_t *data)
 {
-	obs_data_set_string(data,"transition", obs_source_get_name(transition));
+	obs_data_set_string(data, "transition",
+			    obs_source_get_name(transition));
 	obs_data_set_int(data, "transition_duration", transitionDuration);
 	obs_data_array_t *sceneArray = obs_data_array_create();
 	for (int i = 0; i < scenesList->count(); i++) {
@@ -300,8 +321,9 @@ void DownstreamKeyer::SetTransition(const char *transition_name)
 		obs_transition_clear(oldTransition);
 		obs_source_release(oldTransition);
 	} else {
-		auto item = scenesList->currentItem();
-		if (item) {
+		const auto l = scenesList->selectedItems();
+		if (l.count()) {
+			auto item = l.value(0);
 			auto scene = obs_get_source_by_name(
 				QT_TO_UTF8(item->text()));
 			obs_transition_set(newTransition, scene);
@@ -334,14 +356,53 @@ void DownstreamKeyer::Load(obs_data_t *data)
 	if (sceneArray) {
 		auto count = obs_data_array_count(sceneArray);
 		for (size_t i = 0; i < count; i++) {
-			auto sceneData = obs_data_array_item(sceneArray, i);
-			auto item = new QListWidgetItem(QT_UTF8(
-				obs_data_get_string(sceneData, "name")));
+			const auto sceneData =
+				obs_data_array_item(sceneArray, i);
+			const auto source_name =
+				obs_data_get_string(sceneData, "name");
+			const auto item =
+				new QListWidgetItem(QT_UTF8(source_name));
 			scenesList->addItem(item);
+			obs_source_t *source =
+				obs_get_source_by_name(source_name);
 			if (item->text() == sceneName) {
+				if (source) {
+					if (transition) {
+						obs_transition_set(transition,
+								   source);
+					} else {
+						obs_set_output_source(
+							outputChannel, source);
+					}
+				}
 				scenesList->setCurrentItem(item);
+				item->setSelected(true);
 			}
 			obs_data_release(sceneData);
+
+			if (source) {
+				std::string enable_hotkey =
+					obs_module_text("EnableDSK");
+				enable_hotkey += " ";
+				enable_hotkey += QT_TO_UTF8(objectName());
+				std::string disable_hotkey =
+					obs_module_text("DisableDSK");
+				disable_hotkey += " ";
+				disable_hotkey += QT_TO_UTF8(objectName());
+				uint64_t h = obs_hotkey_pair_register_source(
+					source, enable_hotkey.c_str(),
+					enable_hotkey.c_str(),
+					disable_hotkey.c_str(),
+					disable_hotkey.c_str(),
+					enable_DSK_hotkey, disable_DSK_hotkey,
+					this, this);
+
+				if (h != OBS_INVALID_HOTKEY_PAIR_ID) {
+					item->setData(Qt::UserRole,
+						      static_cast<uint>(h));
+				}
+				obs_source_release(source);
+			}
 		}
 		obs_data_array_release(sceneArray);
 	}
@@ -371,7 +432,51 @@ void DownstreamKeyer::source_remove(void *data, calldata_t *calldata)
 		const auto item = downstreamKeyer->scenesList->item(i);
 		if (item->text() == name) {
 			downstreamKeyer->scenesList->removeItemWidget(item);
+			obs_hotkey_pair_unregister(
+				item->data(Qt::UserRole).toUInt());
 			delete item;
 		}
 	}
+}
+
+bool DownstreamKeyer::enable_DSK_hotkey(void *data, obs_hotkey_pair_id id,
+					obs_hotkey_t *hotkey, bool pressed)
+{
+	if (!pressed)
+		return false;
+	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
+	bool changed = false;
+	for (int i = 0; i < downstreamKeyer->scenesList->count(); i++) {
+		auto item = downstreamKeyer->scenesList->item(i);
+		if (!item)
+			continue;
+		if (item->data(Qt::UserRole).toUInt() == id) {
+			if (!item->isSelected()) {
+				item->setSelected(true);
+				changed = true;
+			}
+		}
+	}
+	return changed;
+}
+
+bool DownstreamKeyer::disable_DSK_hotkey(void *data, obs_hotkey_pair_id id,
+					 obs_hotkey_t *hotkey, bool pressed)
+{
+	if (!pressed)
+		return false;
+	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
+	bool changed = false;
+	for (int i = 0; i < downstreamKeyer->scenesList->count(); i++) {
+		auto item = downstreamKeyer->scenesList->item(i);
+		if (!item)
+			continue;
+		if (item->data(Qt::UserRole).toUInt() == id) {
+			if (item->isSelected()) {
+				item->setSelected(false);
+				changed = true;
+			}
+		}
+	}
+	return changed;
 }

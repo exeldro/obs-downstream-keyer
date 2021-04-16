@@ -21,9 +21,13 @@ private:
 
 	static void source_rename(void *data, calldata_t *calldata);
 	static void source_remove(void *data, calldata_t *calldata);
+	static bool enable_DSK_hotkey(void *data, obs_hotkey_pair_id id,
+				      obs_hotkey_t *hotkey, bool pressed);
+	static bool disable_DSK_hotkey(void *data, obs_hotkey_pair_id id,
+				       obs_hotkey_t *hotkey, bool pressed);
 
 	void ChangeSceneIndex(bool relative, int idx, int invalidIdx);
-	
+
 private slots:
 	void on_actionAddScene_triggered();
 	void on_actionRemoveScene_triggered();

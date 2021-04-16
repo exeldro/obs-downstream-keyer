@@ -137,9 +137,10 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 		for (size_t i = 0; i < count; i++) {
 			auto keyerData = obs_data_array_item(keyers, i);
 			auto keyer = new DownstreamKeyer(outputChannel + i);
+			keyer->setObjectName(QT_UTF8(
+				obs_data_get_string(keyerData, "name")));
 			keyer->Load(keyerData);
-			tabs->addTab(keyer,
-				     obs_data_get_string(keyerData, "name"));
+			tabs->addTab(keyer, keyer->objectName());
 			obs_data_release(keyerData);
 		}
 		obs_data_array_release(keyers);
@@ -160,8 +161,9 @@ void DownstreamKeyerDock::ClearKeyers()
 
 void DownstreamKeyerDock::AddDefaultKeyer()
 {
-	tabs->addTab(new DownstreamKeyer(outputChannel),
-		     QT_UTF8(obs_module_text("DefaultName")));
+	auto keyer = new DownstreamKeyer(outputChannel);
+	keyer->setObjectName(QT_UTF8(obs_module_text("DefaultName")));
+	tabs->addTab(keyer, keyer->objectName());
 }
 
 void DownstreamKeyerDock::ConfigClicked()
@@ -238,10 +240,11 @@ void DownstreamKeyerDock::ConfigClicked()
 
 void DownstreamKeyerDock::Add()
 {
-	std::string name = "";
+	std::string name = obs_module_text("DefaultName");
 	if (NameDialog::AskForName(this, name)) {
-		tabs->addTab(new DownstreamKeyer(outputChannel + tabs->count()),
-			     QT_UTF8(name.c_str()));
+		auto keyer = new DownstreamKeyer(outputChannel + tabs->count());
+		keyer->setObjectName(QT_UTF8(name.c_str()));
+		tabs->addTab(keyer, keyer->objectName());
 	}
 }
 void DownstreamKeyerDock::Rename()
