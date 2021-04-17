@@ -14,7 +14,7 @@
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_AUTHOR("Exeldro");
-OBS_MODULE_USE_DEFAULT_LOCALE("media-controls", "en-US")
+OBS_MODULE_USE_DEFAULT_LOCALE("downstream-keyer", "en-US")
 
 MODULE_EXTERN struct obs_source_info output_source_info;
 
