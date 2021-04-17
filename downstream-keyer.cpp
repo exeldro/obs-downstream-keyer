@@ -202,7 +202,8 @@ void DownstreamKeyer::on_scenesList_itemSelectionChanged()
 			? obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text()))
 			: nullptr;
 	if (transition) {
-		auto prevSource = obs_transition_get_active_source(transition);
+		const auto prevSource =
+			obs_transition_get_active_source(transition);
 		if (prevSource != currentSource) {
 			obs_transition_set(transition, prevSource);
 
@@ -211,9 +212,12 @@ void DownstreamKeyer::on_scenesList_itemSelectionChanged()
 					     transitionDuration, currentSource);
 		}
 		obs_source_release(prevSource);
-		if (obs_get_output_source(outputChannel) != transition) {
+		obs_source_t *currentOutputSource =
+			obs_get_output_source(outputChannel);
+		if (currentOutputSource != transition) {
 			obs_set_output_source(outputChannel, transition);
 		}
+		obs_source_release(currentOutputSource);
 	} else {
 		obs_set_output_source(outputChannel, currentSource);
 	}
