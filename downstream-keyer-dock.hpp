@@ -20,6 +20,7 @@ private:
 	void ClearKeyers();
 	void AddDefaultKeyer();
 	void ConfigClicked();
+	void SceneChanged();
 private slots:
 	void Add();
 	void Rename();

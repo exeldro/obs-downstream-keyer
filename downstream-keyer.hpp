@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QCheckBox>
 #include <qcombobox.h>
 #include <qlabel.h>
 #include <qlistwidget.h>
@@ -8,6 +9,14 @@
 #include <QWidget>
 
 #include "obs.h"
+
+class LockedCheckBox : public QCheckBox {
+	Q_OBJECT
+
+public:
+	LockedCheckBox();
+	explicit LockedCheckBox(QWidget *parent);
+};
 
 class DownstreamKeyer : public QWidget {
 	Q_OBJECT
@@ -18,6 +27,7 @@ private:
 	QListWidget *scenesList;
 	QToolBar *scenesToolbar;
 	uint32_t transitionDuration;
+	LockedCheckBox *tie;
 
 	static void source_rename(void *data, calldata_t *calldata);
 	static void source_remove(void *data, calldata_t *calldata);
@@ -47,4 +57,5 @@ public:
 	std::string GetTransition();
 	void SetTransitionDuration(int duration);
 	int GetTransitionDuration();
+	void SceneChanged();
 };

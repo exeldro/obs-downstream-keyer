@@ -1,5 +1,6 @@
 #include "downstream-keyer.hpp"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QLabel>
 #include <QLineEdit>
@@ -91,6 +92,12 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 	connect(actionSceneNull, SIGNAL(triggered()), this,
 		SLOT(on_actionSceneNull_triggered()));
 	scenesToolbar->addAction(actionSceneNull);
+
+	scenesToolbar->addSeparator();
+	
+	tie = new LockedCheckBox(this);
+	tie->setObjectName(QStringLiteral("tie"));
+	scenesToolbar->addWidget(tie);
 
 	// Themes need the QAction dynamic properties
 	for (QAction *x : scenesToolbar->actions()) {
@@ -196,6 +203,9 @@ void DownstreamKeyer::on_actionSceneNull_triggered()
 
 void DownstreamKeyer::on_scenesList_itemSelectionChanged()
 {
+	if (tie->isChecked())
+		return;
+	
 	const auto l = scenesList->selectedItems();
 	const auto currentSource =
 		l.count()
@@ -246,7 +256,7 @@ void DownstreamKeyer::ChangeSceneIndex(bool relative, int offset,
 void DownstreamKeyer::Save(obs_data_t *data)
 {
 	obs_data_set_string(data, "transition",
-			    obs_source_get_name(transition));
+			    transition?obs_source_get_name(transition):"");
 	obs_data_set_int(data, "transition_duration", transitionDuration);
 	obs_data_array_t *sceneArray = obs_data_array_create();
 	for (int i = 0; i < scenesList->count(); i++) {
@@ -279,7 +289,7 @@ void DownstreamKeyer::SetTransition(const char *transition_name)
 {
 	if (!transition && (!transition_name || !strlen(transition_name)))
 		return;
-
+	
 	obs_source_t *oldTransition = transition;
 	obs_source_t *newTransition = nullptr;
 	obs_frontend_source_list transitions = {0};
@@ -348,6 +358,44 @@ void DownstreamKeyer::SetTransitionDuration(int duration)
 int DownstreamKeyer::GetTransitionDuration()
 {
 	return transitionDuration;
+}
+
+void DownstreamKeyer::SceneChanged()
+{
+	if (!tie->isChecked())
+		return;
+	
+	const auto l = scenesList->selectedItems();
+	const auto newSource =
+		l.count()
+			? obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text()))
+			: nullptr;
+	
+	if (transition) {
+		const auto prevSource =
+			obs_transition_get_active_source(transition);
+		if (prevSource != newSource) {
+			obs_transition_set(transition, prevSource);
+
+			obs_transition_start(transition,
+					     OBS_TRANSITION_MODE_AUTO,
+					     transitionDuration, newSource);
+		}
+		obs_source_release(prevSource);
+		obs_source_t *currentOutputSource =
+			obs_get_output_source(outputChannel);
+		if (currentOutputSource != transition) {
+			obs_set_output_source(outputChannel, transition);
+		}
+		obs_source_release(currentOutputSource);
+	}else {
+		const auto prevSource = obs_get_output_source(outputChannel);
+		if (prevSource != newSource) {
+			obs_set_output_source(outputChannel, newSource);
+		}
+		obs_source_release(prevSource);
+	}
+	
 }
 
 void DownstreamKeyer::Load(obs_data_t *data)
@@ -484,3 +532,7 @@ bool DownstreamKeyer::disable_DSK_hotkey(void *data, obs_hotkey_pair_id id,
 	}
 	return changed;
 }
+
+LockedCheckBox::LockedCheckBox() {}
+
+LockedCheckBox::LockedCheckBox(QWidget *parent) : QCheckBox(parent) {}

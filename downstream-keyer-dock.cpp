@@ -8,6 +8,7 @@
 
 #include "downstream-keyer.hpp"
 #include "name-dialog.hpp"
+#include "version.h"
 
 #define QT_UTF8(str) QString::fromUtf8(str)
 #define QT_TO_UTF8(str) str.toUtf8().constData()
@@ -20,6 +21,7 @@ MODULE_EXTERN struct obs_source_info output_source_info;
 
 bool obs_module_load()
 {
+	blog(LOG_INFO, "[Downstream Keyer] loaded version %s", PROJECT_VERSION);
 	obs_register_source(&output_source_info);
 	const auto main_window =
 		static_cast<QMainWindow *>(obs_frontend_get_main_window());
@@ -70,6 +72,8 @@ void DownstreamKeyerDock::frontend_event(enum obs_frontend_event event,
 		}
 	} else if (event == OBS_FRONTEND_EVENT_EXIT) {
 		downstreamKeyerDock->ClearKeyers();
+	} else if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED) {
+		downstreamKeyerDock->SceneChanged();
 	}
 }
 
@@ -164,6 +168,15 @@ void DownstreamKeyerDock::AddDefaultKeyer()
 	auto keyer = new DownstreamKeyer(outputChannel);
 	keyer->setObjectName(QT_UTF8(obs_module_text("DefaultName")));
 	tabs->addTab(keyer, keyer->objectName());
+}
+void DownstreamKeyerDock::SceneChanged()
+{
+	const int count = tabs->count();
+	for (int i = 0; i < count;i++) {
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
+		if (w)
+			w->SceneChanged();
+	}	
 }
 
 void DownstreamKeyerDock::ConfigClicked()
