@@ -1,8 +1,10 @@
 #pragma once
 #include <QDockWidget>
+#include <qmenu.h>
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <../UI/obs-frontend-api/obs-frontend-api.h>
+#include "downstream-keyer.hpp"
 
 class DownstreamKeyerDock : public QDockWidget {
 	Q_OBJECT
@@ -21,6 +23,7 @@ private:
 	void AddDefaultKeyer();
 	void ConfigClicked();
 	void SceneChanged();
+	void AddTransitionMenu(QMenu *tm, enum transitionType transition_type);
 private slots:
 	void Add();
 	void Rename();

@@ -17,7 +17,13 @@
 #define QT_TO_UTF8(str) str.toUtf8().constData()
 
 DownstreamKeyer::DownstreamKeyer(int channel)
-	: outputChannel(channel), transition(nullptr), transitionDuration(300)
+	: outputChannel(channel),
+	  transition(nullptr),
+	  showTransition(nullptr),
+	  hideTransition(nullptr),
+	  transitionDuration(300),
+	  showTransitionDuration(300),
+	  hideTransitionDuration(300)
 {
 	auto layout = new QVBoxLayout(this);
 	layout->setSpacing(0);
@@ -94,9 +100,10 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 	scenesToolbar->addAction(actionSceneNull);
 
 	scenesToolbar->addSeparator();
-	
+
 	tie = new LockedCheckBox(this);
 	tie->setObjectName(QStringLiteral("tie"));
+	tie->setToolTip(QT_UTF8(obs_module_text("Tie")));
 	scenesToolbar->addWidget(tie);
 
 	// Themes need the QAction dynamic properties
@@ -127,6 +134,16 @@ DownstreamKeyer::~DownstreamKeyer()
 		obs_transition_clear(transition);
 		obs_source_release(transition);
 		transition = nullptr;
+	}
+	if (showTransition) {
+		obs_transition_clear(showTransition);
+		obs_source_release(showTransition);
+		showTransition = nullptr;
+	}
+	if (hideTransition) {
+		obs_transition_clear(hideTransition);
+		obs_source_release(hideTransition);
+		hideTransition = nullptr;
 	}
 	const auto sh = obs_get_signal_handler();
 	signal_handler_disconnect(sh, "source_rename", source_rename, this);
@@ -201,37 +218,58 @@ void DownstreamKeyer::on_actionSceneNull_triggered()
 	scenesList->setCurrentRow(-1);
 }
 
+void DownstreamKeyer::apply_selected_source()
+{
+	const auto l = scenesList->selectedItems();
+	const auto newSource =
+		l.count()
+			? obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text()))
+			: nullptr;
+
+	obs_source_t *prevSource = obs_get_output_source(outputChannel);
+	obs_source_t *prevTransition = nullptr;
+	if (prevSource &&
+	    obs_source_get_type(prevSource) == OBS_SOURCE_TYPE_TRANSITION) {
+		prevTransition = prevSource;
+		prevSource = obs_transition_get_active_source(prevSource);
+	}
+	obs_source_t *newTransition = nullptr;
+	uint32_t newTransitionDuration = transitionDuration;
+	if (prevSource == newSource) {
+	} else if (!prevSource && newSource && showTransition) {
+		newTransition = showTransition;
+		newTransitionDuration = showTransitionDuration;
+	} else if (prevSource && !newSource && hideTransition) {
+		newTransition = hideTransition;
+		newTransitionDuration = hideTransitionDuration;
+	} else if (transition) {
+		newTransition = transition;
+	}
+	if (prevSource == newSource) {
+		//skip if nothing changed
+	} else if (!newTransition) {
+		obs_set_output_source(outputChannel, newSource);
+	} else {
+		obs_transition_set(newTransition, prevSource);
+
+		obs_transition_start(newTransition, OBS_TRANSITION_MODE_AUTO,
+				     newTransitionDuration, newSource);
+
+		if (prevTransition != newTransition)
+			obs_set_output_source(outputChannel, newTransition);
+	}
+
+	obs_source_release(prevSource);
+	obs_source_release(prevTransition);
+	obs_source_release(newSource);
+}
+
 void DownstreamKeyer::on_scenesList_itemSelectionChanged()
 {
 	if (tie->isChecked())
 		return;
-	
-	const auto l = scenesList->selectedItems();
-	const auto currentSource =
-		l.count()
-			? obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text()))
-			: nullptr;
-	if (transition) {
-		const auto prevSource =
-			obs_transition_get_active_source(transition);
-		if (prevSource != currentSource) {
-			obs_transition_set(transition, prevSource);
 
-			obs_transition_start(transition,
-					     OBS_TRANSITION_MODE_AUTO,
-					     transitionDuration, currentSource);
-		}
-		obs_source_release(prevSource);
-		obs_source_t *currentOutputSource =
-			obs_get_output_source(outputChannel);
-		if (currentOutputSource != transition) {
-			obs_set_output_source(outputChannel, transition);
-		}
-		obs_source_release(currentOutputSource);
-	} else {
-		obs_set_output_source(outputChannel, currentSource);
-	}
-	obs_source_release(currentSource);
+	apply_selected_source();
 }
 
 void DownstreamKeyer::ChangeSceneIndex(bool relative, int offset,
@@ -256,8 +294,18 @@ void DownstreamKeyer::ChangeSceneIndex(bool relative, int offset,
 void DownstreamKeyer::Save(obs_data_t *data)
 {
 	obs_data_set_string(data, "transition",
-			    transition?obs_source_get_name(transition):"");
+			    transition ? obs_source_get_name(transition) : "");
 	obs_data_set_int(data, "transition_duration", transitionDuration);
+	obs_data_set_string(data, "show_transition",
+			    showTransition ? obs_source_get_name(showTransition)
+					   : "");
+	obs_data_set_int(data, "show_transition_duration",
+			 showTransitionDuration);
+	obs_data_set_string(data, "hide_transition",
+			    hideTransition ? obs_source_get_name(hideTransition)
+					   : "");
+	obs_data_set_int(data, "hide_transition_duration",
+			 hideTransitionDuration);
 	obs_data_array_t *sceneArray = obs_data_array_create();
 	for (int i = 0; i < scenesList->count(); i++) {
 		auto item = scenesList->item(i);
@@ -278,19 +326,29 @@ void DownstreamKeyer::Save(obs_data_t *data)
 	obs_data_array_release(sceneArray);
 }
 
-std::string DownstreamKeyer::GetTransition()
+std::string DownstreamKeyer::GetTransition(enum transitionType transition_type)
 {
-	if (!transition)
-		return "";
-	return obs_source_get_name(transition);
+	if (transition_type == transitionType::match && transition)
+		return obs_source_get_name(transition);
+	if (transition_type == transitionType::show && showTransition)
+		return obs_source_get_name(showTransition);
+	if (transition_type == transitionType::hide && hideTransition)
+		return obs_source_get_name(hideTransition);
+	return "";
 }
 
-void DownstreamKeyer::SetTransition(const char *transition_name)
+void DownstreamKeyer::SetTransition(const char *transition_name,
+				    enum transitionType transition_type)
 {
-	if (!transition && (!transition_name || !strlen(transition_name)))
-		return;
-	
 	obs_source_t *oldTransition = transition;
+	if (transition_type == transitionType::show)
+		oldTransition = showTransition;
+	else if (transition_type == transitionType::hide)
+		oldTransition = hideTransition;
+
+	if (!oldTransition && (!transition_name || !strlen(transition_name)))
+		return;
+
 	obs_source_t *newTransition = nullptr;
 	obs_frontend_source_list transitions = {0};
 	obs_frontend_get_transitions(&transitions);
@@ -309,54 +367,56 @@ void DownstreamKeyer::SetTransition(const char *transition_name)
 		}
 	}
 	obs_frontend_source_list_free(&transitions);
-	if (!newTransition) {
-		auto item = scenesList->currentItem();
-		if (item) {
-			auto scene = obs_get_source_by_name(
-				QT_TO_UTF8(item->text()));
-			obs_set_output_source(outputChannel, scene);
-			obs_source_release(scene);
-		} else {
-			obs_set_output_source(outputChannel, nullptr);
-		}
-		if (transition) {
-			transition = nullptr;
-			obs_transition_clear(oldTransition);
-			obs_source_release(oldTransition);
-		}
-		return;
-	}
 
-	if (oldTransition) {
-		obs_transition_swap_begin(newTransition, oldTransition);
-		obs_set_output_source(outputChannel, newTransition);
+	if (transition_type == transitionType::show)
+		showTransition = newTransition;
+	else if (transition_type == transitionType::hide)
+		hideTransition = newTransition;
+	else
 		transition = newTransition;
-		obs_transition_swap_end(newTransition, oldTransition);
+
+	if (oldTransition &&
+	    obs_get_output_source(outputChannel) == oldTransition) {
+		if (newTransition) {
+			//swap transition
+			obs_transition_swap_begin(newTransition, oldTransition);
+			obs_set_output_source(outputChannel, newTransition);
+			obs_transition_swap_end(newTransition, oldTransition);
+		} else {
+			auto item = scenesList->currentItem();
+			if (item) {
+				auto scene = obs_get_source_by_name(
+					QT_TO_UTF8(item->text()));
+				obs_set_output_source(outputChannel, scene);
+				obs_source_release(scene);
+			} else {
+				obs_set_output_source(outputChannel, nullptr);
+			}
+		}
+	}
+	if (oldTransition) {
 		obs_transition_clear(oldTransition);
 		obs_source_release(oldTransition);
-	} else {
-		const auto l = scenesList->selectedItems();
-		if (l.count()) {
-			auto item = l.value(0);
-			auto scene = obs_get_source_by_name(
-				QT_TO_UTF8(item->text()));
-			obs_transition_set(newTransition, scene);
-			obs_source_release(scene);
-		} else {
-			obs_transition_set(newTransition, nullptr);
-		}
-		obs_set_output_source(outputChannel, newTransition);
-		transition = newTransition;
 	}
 }
 
-void DownstreamKeyer::SetTransitionDuration(int duration)
+void DownstreamKeyer::SetTransitionDuration(int duration,
+					    enum transitionType transition_type)
 {
-	transitionDuration = duration;
+	if (transition_type == match)
+		transitionDuration = duration;
+	else if (transition_type == transitionType::show)
+		showTransitionDuration = duration;
+	else if (transition_type == transitionType::hide)
+		hideTransitionDuration = duration;
 }
 
-int DownstreamKeyer::GetTransitionDuration()
+int DownstreamKeyer::GetTransitionDuration(enum transitionType transition_type)
 {
+	if (transition_type == transitionType::show)
+		return showTransitionDuration;
+	if (transition_type == transitionType::hide)
+		return hideTransitionDuration;
 	return transitionDuration;
 }
 
@@ -364,44 +424,22 @@ void DownstreamKeyer::SceneChanged()
 {
 	if (!tie->isChecked())
 		return;
-	
-	const auto l = scenesList->selectedItems();
-	const auto newSource =
-		l.count()
-			? obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text()))
-			: nullptr;
-	
-	if (transition) {
-		const auto prevSource =
-			obs_transition_get_active_source(transition);
-		if (prevSource != newSource) {
-			obs_transition_set(transition, prevSource);
 
-			obs_transition_start(transition,
-					     OBS_TRANSITION_MODE_AUTO,
-					     transitionDuration, newSource);
-		}
-		obs_source_release(prevSource);
-		obs_source_t *currentOutputSource =
-			obs_get_output_source(outputChannel);
-		if (currentOutputSource != transition) {
-			obs_set_output_source(outputChannel, transition);
-		}
-		obs_source_release(currentOutputSource);
-	}else {
-		const auto prevSource = obs_get_output_source(outputChannel);
-		if (prevSource != newSource) {
-			obs_set_output_source(outputChannel, newSource);
-		}
-		obs_source_release(prevSource);
-	}
-	
+	apply_selected_source();
 }
 
 void DownstreamKeyer::Load(obs_data_t *data)
 {
 	SetTransition(obs_data_get_string(data, "transition"));
 	transitionDuration = obs_data_get_int(data, "transition_duration");
+	SetTransition(obs_data_get_string(data, "show_transition"),
+		      transitionType::show);
+	showTransitionDuration =
+		obs_data_get_int(data, "show_transition_duration");
+	SetTransition(obs_data_get_string(data, "hide_transition"),
+		      transitionType::hide);
+	hideTransitionDuration =
+		obs_data_get_int(data, "hide_transition_duration");
 	scenesList->clear();
 	obs_data_array_t *sceneArray = obs_data_get_array(data, "scenes");
 	const auto sceneName = QT_UTF8(obs_data_get_string(data, "scene"));
@@ -418,15 +456,10 @@ void DownstreamKeyer::Load(obs_data_t *data)
 			obs_source_t *source =
 				obs_get_source_by_name(source_name);
 			if (item->text() == sceneName) {
-				if (source) {
-					if (transition) {
-						obs_transition_set(transition,
-								   source);
-					} else {
-						obs_set_output_source(
-							outputChannel, source);
-					}
-				}
+				if (source)
+					obs_set_output_source(outputChannel,
+							      source);
+
 				scenesList->setCurrentItem(item);
 				item->setSelected(true);
 			}

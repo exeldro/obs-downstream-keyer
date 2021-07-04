@@ -179,36 +179,29 @@ void DownstreamKeyerDock::SceneChanged()
 	}	
 }
 
-void DownstreamKeyerDock::ConfigClicked()
+void DownstreamKeyerDock::AddTransitionMenu(QMenu *tm,
+					    enum transitionType transition_type)
 {
-	QMenu popup;
-	auto *a = popup.addAction(QT_UTF8(obs_module_text("Add")));
-	connect(a, SIGNAL(triggered()), this, SLOT(Add()));
-	a = popup.addAction(QT_UTF8(obs_module_text("Rename")));
-	connect(a, SIGNAL(triggered()), this, SLOT(Rename()));
-	a = popup.addAction(QT_UTF8(obs_module_text("Remove")));
-	connect(a, SIGNAL(triggered()), this, SLOT(Remove()));
-	std::string transition = "";
+
+	std::string transition;
 	int transition_duration = 300;
 	auto w = dynamic_cast<DownstreamKeyer *>(tabs->currentWidget());
 	if (w) {
-		transition = w->GetTransition();
-		transition_duration = w->GetTransitionDuration();
+		transition = w->GetTransition(transition_type);
+		transition_duration = w->GetTransitionDuration(transition_type);
 	}
 
-	auto setTransition = [this](std::string name) {
+	auto setTransition = [this, transition_type](std::string name) {
 		auto w = dynamic_cast<DownstreamKeyer *>(tabs->currentWidget());
-		if (w) {
-			w->SetTransition(name.c_str());
-		}
+		if (w)
+			w->SetTransition(name.c_str(), transition_type);
 	};
 
-	auto tm = popup.addMenu(QT_UTF8(obs_module_text("Transition")));
-	a = tm->addAction(QT_UTF8(obs_module_text("None")));
+	auto a = tm->addAction(QT_UTF8(obs_module_text("None")));
 	a->setCheckable(true);
 	a->setChecked(transition.empty());
 	connect(a, &QAction::triggered,
-		[setTransition] { return setTransition(""); });
+		[setTransition, transition_type] { return setTransition(""); });
 	tm->addSeparator();
 	obs_frontend_source_list transitions = {0};
 	obs_frontend_get_transitions(&transitions);
@@ -221,7 +214,7 @@ void DownstreamKeyerDock::ConfigClicked()
 		a->setCheckable(true);
 		a->setChecked(strcmp(transition.c_str(), n) == 0);
 		connect(a, &QAction::triggered,
-			[setTransition, n] { return setTransition(n); });
+		        [setTransition, n] { return setTransition(n); });
 	}
 	obs_frontend_source_list_free(&transitions);
 
@@ -234,20 +227,36 @@ void DownstreamKeyerDock::ConfigClicked()
 	duration->setSingleStep(50);
 	duration->setValue(transition_duration);
 
-	auto setDuration = [this](int duration) {
+	auto setDuration = [this, transition_type](int duration) {
 		auto w = dynamic_cast<DownstreamKeyer *>(tabs->currentWidget());
-		if (w) {
-			w->SetTransitionDuration(duration);
-		}
+		if (w)
+			w->SetTransitionDuration(duration, transition_type);
+		
 	};
 	connect(duration, (void (QSpinBox::*)(int)) & QSpinBox::valueChanged,
-		setDuration);
+	        setDuration);
 
 	QWidgetAction *durationAction = new QWidgetAction(tm);
 	durationAction->setDefaultWidget(duration);
 
 	tm->addAction(durationAction);
+}
 
+void DownstreamKeyerDock::ConfigClicked()
+{
+	QMenu popup;
+	auto *a = popup.addAction(QT_UTF8(obs_module_text("Add")));
+	connect(a, SIGNAL(triggered()), this, SLOT(Add()));
+	a = popup.addAction(QT_UTF8(obs_module_text("Rename")));
+	connect(a, SIGNAL(triggered()), this, SLOT(Rename()));
+	a = popup.addAction(QT_UTF8(obs_module_text("Remove")));
+	connect(a, SIGNAL(triggered()), this, SLOT(Remove()));
+	auto tm = popup.addMenu(QT_UTF8(obs_module_text("Transition")));
+	AddTransitionMenu(tm, transitionType::match);
+	tm = popup.addMenu(QT_UTF8(obs_module_text("ShowTransition")));
+	AddTransitionMenu(tm, transitionType::show);
+	tm = popup.addMenu(QT_UTF8(obs_module_text("HideTransition")));
+	AddTransitionMenu(tm, transitionType::hide);
 	popup.exec(QCursor::pos());
 }
 

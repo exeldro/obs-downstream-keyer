@@ -18,15 +18,21 @@ public:
 	explicit LockedCheckBox(QWidget *parent);
 };
 
+enum transitionType { match, show, hide };
+
 class DownstreamKeyer : public QWidget {
 	Q_OBJECT
 
 private:
 	int outputChannel;
 	obs_source_t *transition;
+	obs_source_t *showTransition;
+	obs_source_t *hideTransition;
 	QListWidget *scenesList;
 	QToolBar *scenesToolbar;
 	uint32_t transitionDuration;
+	uint32_t showTransitionDuration;
+	uint32_t hideTransitionDuration;
 	LockedCheckBox *tie;
 
 	static void source_rename(void *data, calldata_t *calldata);
@@ -44,6 +50,7 @@ private slots:
 	void on_actionSceneUp_triggered();
 	void on_actionSceneDown_triggered();
 	void on_actionSceneNull_triggered();
+	void apply_selected_source();
 	void on_scenesList_itemSelectionChanged();
 signals:
 
@@ -53,9 +60,11 @@ public:
 
 	void Save(obs_data_t *data);
 	void Load(obs_data_t *data);
-	void SetTransition(const char *transition_name);
-	std::string GetTransition();
-	void SetTransitionDuration(int duration);
-	int GetTransitionDuration();
+	void SetTransition(const char *transition_name,
+			   enum transitionType transition_type = match);
+	std::string GetTransition(enum transitionType transition_type = match);
+	void SetTransitionDuration(int duration,
+				   enum transitionType transition_type = match);
+	int GetTransitionDuration(enum transitionType transition_type = match);
 	void SceneChanged();
 };
