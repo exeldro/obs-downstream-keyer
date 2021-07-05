@@ -34,12 +34,22 @@ private:
 	uint32_t showTransitionDuration;
 	uint32_t hideTransitionDuration;
 	LockedCheckBox *tie;
+	obs_hotkey_id null_hotkey_id;
+	obs_hotkey_pair_id tie_hotkey_id;
 
 	static void source_rename(void *data, calldata_t *calldata);
 	static void source_remove(void *data, calldata_t *calldata);
 	static bool enable_DSK_hotkey(void *data, obs_hotkey_pair_id id,
 				      obs_hotkey_t *hotkey, bool pressed);
 	static bool disable_DSK_hotkey(void *data, obs_hotkey_pair_id id,
+				       obs_hotkey_t *hotkey, bool pressed);
+
+	static void null_hotkey(void *data, obs_hotkey_id id,
+				obs_hotkey_t *hotkey, bool pressed);
+
+	static bool enable_tie_hotkey(void *data, obs_hotkey_pair_id id,
+				      obs_hotkey_t *hotkey, bool pressed);
+	static bool disable_tie_hotkey(void *data, obs_hotkey_pair_id id,
 				       obs_hotkey_t *hotkey, bool pressed);
 
 	void ChangeSceneIndex(bool relative, int idx, int invalidIdx);
@@ -55,7 +65,7 @@ private slots:
 signals:
 
 public:
-	DownstreamKeyer(int channel);
+	DownstreamKeyer(int channel, QString name);
 	~DownstreamKeyer();
 
 	void Save(obs_data_t *data);

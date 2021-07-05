@@ -140,9 +140,9 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 		}
 		for (size_t i = 0; i < count; i++) {
 			auto keyerData = obs_data_array_item(keyers, i);
-			auto keyer = new DownstreamKeyer(outputChannel + i);
-			keyer->setObjectName(QT_UTF8(
-				obs_data_get_string(keyerData, "name")));
+			auto keyer = new DownstreamKeyer(
+				outputChannel + i, QT_UTF8(obs_data_get_string(
+							   keyerData, "name")));
 			keyer->Load(keyerData);
 			tabs->addTab(keyer, keyer->objectName());
 			obs_data_release(keyerData);
@@ -165,18 +165,18 @@ void DownstreamKeyerDock::ClearKeyers()
 
 void DownstreamKeyerDock::AddDefaultKeyer()
 {
-	auto keyer = new DownstreamKeyer(outputChannel);
-	keyer->setObjectName(QT_UTF8(obs_module_text("DefaultName")));
+	auto keyer = new DownstreamKeyer(
+		outputChannel, QT_UTF8(obs_module_text("DefaultName")));
 	tabs->addTab(keyer, keyer->objectName());
 }
 void DownstreamKeyerDock::SceneChanged()
 {
 	const int count = tabs->count();
-	for (int i = 0; i < count;i++) {
+	for (int i = 0; i < count; i++) {
 		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
 		if (w)
 			w->SceneChanged();
-	}	
+	}
 }
 
 void DownstreamKeyerDock::AddTransitionMenu(QMenu *tm,
@@ -214,7 +214,7 @@ void DownstreamKeyerDock::AddTransitionMenu(QMenu *tm,
 		a->setCheckable(true);
 		a->setChecked(strcmp(transition.c_str(), n) == 0);
 		connect(a, &QAction::triggered,
-		        [setTransition, n] { return setTransition(n); });
+			[setTransition, n] { return setTransition(n); });
 	}
 	obs_frontend_source_list_free(&transitions);
 
@@ -231,10 +231,9 @@ void DownstreamKeyerDock::AddTransitionMenu(QMenu *tm,
 		auto w = dynamic_cast<DownstreamKeyer *>(tabs->currentWidget());
 		if (w)
 			w->SetTransitionDuration(duration, transition_type);
-		
 	};
 	connect(duration, (void (QSpinBox::*)(int)) & QSpinBox::valueChanged,
-	        setDuration);
+		setDuration);
 
 	QWidgetAction *durationAction = new QWidgetAction(tm);
 	durationAction->setDefaultWidget(duration);
@@ -264,8 +263,8 @@ void DownstreamKeyerDock::Add()
 {
 	std::string name = obs_module_text("DefaultName");
 	if (NameDialog::AskForName(this, name)) {
-		auto keyer = new DownstreamKeyer(outputChannel + tabs->count());
-		keyer->setObjectName(QT_UTF8(name.c_str()));
+		auto keyer = new DownstreamKeyer(outputChannel + tabs->count(),
+						 QT_UTF8(name.c_str()));
 		tabs->addTab(keyer, keyer->objectName());
 	}
 }

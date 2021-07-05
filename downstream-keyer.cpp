@@ -16,7 +16,7 @@
 #define QT_UTF8(str) QString::fromUtf8(str)
 #define QT_TO_UTF8(str) str.toUtf8().constData()
 
-DownstreamKeyer::DownstreamKeyer(int channel)
+DownstreamKeyer::DownstreamKeyer(int channel, QString name)
 	: outputChannel(channel),
 	  transition(nullptr),
 	  showTransition(nullptr),
@@ -25,6 +25,7 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 	  showTransitionDuration(300),
 	  hideTransitionDuration(300)
 {
+	setObjectName(name);
 	auto layout = new QVBoxLayout(this);
 	layout->setSpacing(0);
 	layout->setContentsMargins(0, 0, 0, 0);
@@ -125,11 +126,34 @@ DownstreamKeyer::DownstreamKeyer(int channel)
 	signal_handler_connect(sh, "source_remove", source_remove, this);
 
 	setLayout(layout);
+	QString disableDskHotkeyName = QT_UTF8(obs_module_text("DisableDSK"));
+	disableDskHotkeyName += " ";
+	disableDskHotkeyName += name;
+
+	null_hotkey_id = obs_hotkey_register_frontend(
+		QT_TO_UTF8(disableDskHotkeyName),
+		QT_TO_UTF8(disableDskHotkeyName), null_hotkey, this);
+	QString enableTieHotkeyName = QT_UTF8(obs_module_text("EnableTie"));
+	enableTieHotkeyName += " ";
+	enableTieHotkeyName += name;
+	QString disableTieHotkeyName = QT_UTF8(obs_module_text("DisableTie"));
+	disableTieHotkeyName += " ";
+	disableTieHotkeyName += name;
+
+	tie_hotkey_id = obs_hotkey_pair_register_frontend(
+		QT_TO_UTF8(enableTieHotkeyName),
+		QT_TO_UTF8(enableTieHotkeyName),
+		QT_TO_UTF8(disableTieHotkeyName),
+		QT_TO_UTF8(disableTieHotkeyName), enable_tie_hotkey,
+		disable_tie_hotkey, this, this);
 }
 
 DownstreamKeyer::~DownstreamKeyer()
 {
 	obs_set_output_source(outputChannel, nullptr);
+	obs_hotkey_unregister(null_hotkey_id);
+	obs_hotkey_pair_unregister(tie_hotkey_id);
+
 	if (transition) {
 		obs_transition_clear(transition);
 		obs_source_release(transition);
@@ -324,6 +348,17 @@ void DownstreamKeyer::Save(obs_data_t *data)
 			? QT_TO_UTF8(scenesList->currentItem()->text())
 			: "");
 	obs_data_array_release(sceneArray);
+
+	obs_data_array_t *nh = obs_hotkey_save(null_hotkey_id);
+	obs_data_set_array(data, "null_hotkey", nh);
+	obs_data_array_release(nh);
+	obs_data_array_t *eth = nullptr;
+	obs_data_array_t *dth = nullptr;
+	obs_hotkey_pair_save(tie_hotkey_id, &eth, &dth);
+	obs_data_set_array(data, "enable_tie_hotkey", eth);
+	obs_data_set_array(data, "disable_tie_hotkey", dth);
+	obs_data_array_release(eth);
+	obs_data_array_release(dth);
 }
 
 std::string DownstreamKeyer::GetTransition(enum transitionType transition_type)
@@ -491,6 +526,14 @@ void DownstreamKeyer::Load(obs_data_t *data)
 		}
 		obs_data_array_release(sceneArray);
 	}
+	obs_data_array_t *nh = obs_data_get_array(data, "null_hotkey");
+	obs_hotkey_load(null_hotkey_id, nh);
+	obs_data_array_release(nh);
+	obs_data_array_t *eth = obs_data_get_array(data, "enable_tie_hotkey");
+	obs_data_array_t *dth = obs_data_get_array(data, "disable_tie_hotkey");
+	obs_hotkey_pair_load(tie_hotkey_id, eth, dth);
+	obs_data_array_release(eth);
+	obs_data_array_release(dth);
 }
 
 void DownstreamKeyer::source_rename(void *data, calldata_t *calldata)
@@ -564,6 +607,40 @@ bool DownstreamKeyer::disable_DSK_hotkey(void *data, obs_hotkey_pair_id id,
 		}
 	}
 	return changed;
+}
+
+void DownstreamKeyer::null_hotkey(void *data, obs_hotkey_id id,
+				  obs_hotkey_t *hotkey, bool pressed)
+{
+	if (!pressed)
+		return;
+	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
+	QMetaObject::invokeMethod(downstreamKeyer,
+				  "on_actionSceneNull_triggered",
+				  Qt::QueuedConnection);
+}
+
+bool DownstreamKeyer::enable_tie_hotkey(void *data, obs_hotkey_pair_id id,
+					obs_hotkey_t *hotkey, bool pressed)
+{
+	if (!pressed)
+		return false;
+	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
+	if (downstreamKeyer->tie->isChecked())
+		return false;
+	downstreamKeyer->tie->setChecked(true);
+	return true;
+}
+bool DownstreamKeyer::disable_tie_hotkey(void *data, obs_hotkey_pair_id id,
+					 obs_hotkey_t *hotkey, bool pressed)
+{
+	if (!pressed)
+		return false;
+	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
+	if (!downstreamKeyer->tie->isChecked())
+		return false;
+	downstreamKeyer->tie->setChecked(false);
+	return true;
 }
 
 LockedCheckBox::LockedCheckBox() {}
