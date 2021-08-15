@@ -77,7 +77,8 @@ void DownstreamKeyerDock::frontend_event(enum obs_frontend_event event,
 	}
 }
 
-DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent) : QDockWidget(parent)
+DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent)
+	: QDockWidget(parent), outputChannel(7)
 {
 	setFeatures(DockWidgetMovable | DockWidgetFloatable);
 	setWindowTitle(QT_UTF8(obs_module_text("DownstreamKeyer")));

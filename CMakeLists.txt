@@ -1,4 +1,4 @@
-project(downstream-keyer VERSION 0.2.0)
+project(downstream-keyer VERSION 0.2.1)
 set(PROJECT_FULL_NAME "Downstream keyer")
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
