@@ -51,6 +51,7 @@ void DownstreamKeyerDock::frontend_save_load(obs_data_t *save_data, bool saving,
 		downstreamKeyerDock->Save(save_data);
 	} else {
 		downstreamKeyerDock->Load(save_data);
+		downstreamKeyerDock->loaded = true;
 	}
 }
 
@@ -58,18 +59,10 @@ void DownstreamKeyerDock::frontend_event(enum obs_frontend_event event,
 					 void *data)
 {
 	auto downstreamKeyerDock = static_cast<DownstreamKeyerDock *>(data);
-	if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP) {
+	if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP &&
+	    downstreamKeyerDock->loaded) {
 		downstreamKeyerDock->ClearKeyers();
 		downstreamKeyerDock->AddDefaultKeyer();
-	} else if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED) {
-		// for as long as OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP does not work
-		if (!downstreamKeyerDock->loadedBeforeSwitchSceneCollection) {
-			downstreamKeyerDock->ClearKeyers();
-			downstreamKeyerDock->AddDefaultKeyer();
-		} else {
-			downstreamKeyerDock->loadedBeforeSwitchSceneCollection =
-				false;
-		}
 	} else if (event == OBS_FRONTEND_EVENT_EXIT) {
 		downstreamKeyerDock->ClearKeyers();
 	} else if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED) {
@@ -78,7 +71,7 @@ void DownstreamKeyerDock::frontend_event(enum obs_frontend_event event,
 }
 
 DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent)
-	: QDockWidget(parent), outputChannel(7)
+	: QDockWidget(parent), outputChannel(7), loaded(false)
 {
 	setFeatures(DockWidgetMovable | DockWidgetFloatable);
 	setWindowTitle(QT_UTF8(obs_module_text("DownstreamKeyer")));
@@ -152,7 +145,6 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 	} else {
 		AddDefaultKeyer();
 	}
-	loadedBeforeSwitchSceneCollection = true;
 }
 
 void DownstreamKeyerDock::ClearKeyers()
@@ -166,6 +158,8 @@ void DownstreamKeyerDock::ClearKeyers()
 
 void DownstreamKeyerDock::AddDefaultKeyer()
 {
+	if (outputChannel < 7)
+		outputChannel = 7;
 	auto keyer = new DownstreamKeyer(
 		outputChannel, QT_UTF8(obs_module_text("DefaultName")));
 	tabs->addTab(keyer, keyer->objectName());
@@ -264,6 +258,8 @@ void DownstreamKeyerDock::Add()
 {
 	std::string name = obs_module_text("DefaultName");
 	if (NameDialog::AskForName(this, name)) {
+		if (outputChannel < 7)
+			outputChannel = 7;
 		auto keyer = new DownstreamKeyer(outputChannel + tabs->count(),
 						 QT_UTF8(name.c_str()));
 		tabs->addTab(keyer, keyer->objectName());
