@@ -48,7 +48,7 @@ jobs:
           if [ -d /usr/local/opt/speexdsp ]; then
             brew unlink speexdsp
           fi
-          brew uninstall curl php
+          brew uninstall curl php composer
           brew bundle --file ./CI/scripts/macos/Brewfile
           echo "NPROC=$(sysctl -n hw.ncpu)" >> $GITHUB_ENV
       - name: 'Install prerequisite: Pre-built dependencies'
