@@ -3,6 +3,7 @@ set(PROJECT_FULL_NAME "Downstream keyer")
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
 
+set(CMAKE_AUTOMOC ON)
 set(downstream-keyer_HEADERS
 	downstream-keyer-dock.hpp
 	downstream-keyer.hpp
