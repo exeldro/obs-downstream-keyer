@@ -122,7 +122,7 @@ void DownstreamKeyerDock::Save(obs_data_t *data)
 void DownstreamKeyerDock::Load(obs_data_t *data)
 {
 	outputChannel = obs_data_get_int(data, "downstream_keyers_channel");
-	if (outputChannel < 7)
+	if (outputChannel < 7 || outputChannel >= MAX_CHANNELS)
 		outputChannel = 7;
 	ClearKeyers();
 	obs_data_array_t *keyers =
@@ -158,7 +158,7 @@ void DownstreamKeyerDock::ClearKeyers()
 
 void DownstreamKeyerDock::AddDefaultKeyer()
 {
-	if (outputChannel < 7)
+	if (outputChannel < 7  || outputChannel >= MAX_CHANNELS)
 		outputChannel = 7;
 	auto keyer = new DownstreamKeyer(
 		outputChannel, QT_UTF8(obs_module_text("DefaultName")));
@@ -258,7 +258,7 @@ void DownstreamKeyerDock::Add()
 {
 	std::string name = obs_module_text("DefaultName");
 	if (NameDialog::AskForName(this, name)) {
-		if (outputChannel < 7)
+		if (outputChannel < 7  || outputChannel >= MAX_CHANNELS)
 			outputChannel = 7;
 		auto keyer = new DownstreamKeyer(outputChannel + tabs->count(),
 						 QT_UTF8(name.c_str()));
