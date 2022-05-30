@@ -24,6 +24,7 @@ private:
 	void ConfigClicked();
 	void SceneChanged();
 	void AddTransitionMenu(QMenu *tm, enum transitionType transition_type);
+	void AddExcludeSceneMenu(QMenu * tm);
 private slots:
 	void Add();
 	void Rename();

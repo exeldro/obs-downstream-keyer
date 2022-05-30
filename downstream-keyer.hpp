@@ -7,6 +7,7 @@
 #include <qspinbox.h>
 #include <qtoolbar.h>
 #include <QWidget>
+#include <set>
 
 #include "obs.h"
 
@@ -36,6 +37,7 @@ private:
 	LockedCheckBox *tie;
 	obs_hotkey_id null_hotkey_id;
 	obs_hotkey_pair_id tie_hotkey_id;
+	std::set<std::string> exclude_scenes;
 
 	static void source_rename(void *data, calldata_t *calldata);
 	static void source_remove(void *data, calldata_t *calldata);
@@ -60,6 +62,7 @@ private slots:
 	void on_actionSceneUp_triggered();
 	void on_actionSceneDown_triggered();
 	void on_actionSceneNull_triggered();
+	void apply_source(obs_source_t *newSource);
 	void apply_selected_source();
 	void on_scenesList_itemSelectionChanged();
 signals:
@@ -76,5 +79,8 @@ public:
 	void SetTransitionDuration(int duration,
 				   enum transitionType transition_type = match);
 	int GetTransitionDuration(enum transitionType transition_type = match);
-	void SceneChanged();
+	void SceneChanged(std::string scene);
+	void AddExcludeScene(const char *scene_name);
+	void RemoveExcludeScene(const char *scene_name);
+	bool IsSceneExcluded(const char *scene_name);
 };

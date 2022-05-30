@@ -242,14 +242,8 @@ void DownstreamKeyer::on_actionSceneNull_triggered()
 	scenesList->setCurrentRow(-1);
 }
 
-void DownstreamKeyer::apply_selected_source()
+void DownstreamKeyer::apply_source(obs_source_t *const newSource)
 {
-	const auto l = scenesList->selectedItems();
-	const auto newSource =
-		l.count()
-			? obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text()))
-			: nullptr;
-
 	obs_source_t *prevSource = obs_get_output_source(outputChannel);
 	obs_source_t *prevTransition = nullptr;
 	if (prevSource &&
@@ -285,6 +279,17 @@ void DownstreamKeyer::apply_selected_source()
 
 	obs_source_release(prevSource);
 	obs_source_release(prevTransition);
+}
+
+void DownstreamKeyer::apply_selected_source()
+{
+	const auto l = scenesList->selectedItems();
+	const auto newSource =
+		l.count()
+			? obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text()))
+			: nullptr;
+
+	apply_source(newSource);
 	obs_source_release(newSource);
 }
 
@@ -359,6 +364,15 @@ void DownstreamKeyer::Save(obs_data_t *data)
 	obs_data_set_array(data, "disable_tie_hotkey", dth);
 	obs_data_array_release(eth);
 	obs_data_array_release(dth);
+	auto excludes = obs_data_array_create();
+	for (auto t : exclude_scenes) {
+		const auto obj = obs_data_create();
+		obs_data_set_string(obj, "name", t.c_str());
+		obs_data_array_push_back(excludes, obj);
+		obs_data_release(obj);
+	}
+	obs_data_set_array(data, "exclude_scenes", excludes);
+	obs_data_array_release(excludes);
 }
 
 std::string DownstreamKeyer::GetTransition(enum transitionType transition_type)
@@ -455,8 +469,33 @@ int DownstreamKeyer::GetTransitionDuration(enum transitionType transition_type)
 	return transitionDuration;
 }
 
-void DownstreamKeyer::SceneChanged()
+void DownstreamKeyer::SceneChanged(std::string scene)
 {
+	auto found = false;
+	for (const auto &e : exclude_scenes) {
+		if (scene == e)
+			found = true;
+	}
+
+	if (found) {
+		apply_source(nullptr);
+		return;
+	} else {
+		obs_source_t *prevSource = obs_get_output_source(outputChannel);
+		if (prevSource && obs_source_get_type(prevSource) ==
+					  OBS_SOURCE_TYPE_TRANSITION) {
+			obs_source_t *prevTransition = prevSource;
+			prevSource = obs_transition_get_active_source(
+				prevTransition);
+			obs_source_release(prevTransition);
+		}
+		if (prevSource == nullptr) {
+			apply_selected_source();
+			return;
+		}
+		obs_source_release(prevSource);
+	}
+
 	if (!tie->isChecked())
 		return;
 
@@ -526,6 +565,14 @@ void DownstreamKeyer::Load(obs_data_t *data)
 		}
 		obs_data_array_release(sceneArray);
 	}
+	if (sceneName.isEmpty()) {
+		for (int i = 0; i < scenesList->count(); i++) {
+			scenesList->item(i)->setSelected(false);
+		}
+		const auto row = scenesList->currentRow();
+		if (row != -1)
+			scenesList->setCurrentRow(-1);
+	}
 	obs_data_array_t *nh = obs_data_get_array(data, "null_hotkey");
 	obs_hotkey_load(null_hotkey_id, nh);
 	obs_data_array_release(nh);
@@ -534,6 +581,19 @@ void DownstreamKeyer::Load(obs_data_t *data)
 	obs_hotkey_pair_load(tie_hotkey_id, eth, dth);
 	obs_data_array_release(eth);
 	obs_data_array_release(dth);
+
+	auto excludes = obs_data_get_array(data, "exclude_scenes");
+	exclude_scenes.clear();
+	if (excludes) {
+		auto count = obs_data_array_count(excludes);
+		for (size_t i = 0; i < count; i++) {
+			const auto sceneData = obs_data_array_item(excludes, i);
+			exclude_scenes.emplace(
+				obs_data_get_string(sceneData, "name"));
+			obs_data_release(sceneData);
+		}
+		obs_data_array_release(excludes);
+	}
 }
 
 void DownstreamKeyer::source_rename(void *data, calldata_t *calldata)
@@ -641,6 +701,30 @@ bool DownstreamKeyer::disable_tie_hotkey(void *data, obs_hotkey_pair_id id,
 		return false;
 	downstreamKeyer->tie->setChecked(false);
 	return true;
+}
+
+void DownstreamKeyer::AddExcludeScene(const char *scene_name)
+{
+	exclude_scenes.emplace(scene_name);
+	const auto scene = obs_frontend_get_current_scene();
+	const auto sn = obs_source_get_name(scene);
+	if (strcmp(sn, scene_name) == 0)
+		SceneChanged(sn);
+	obs_source_release(scene);
+}
+
+void DownstreamKeyer::RemoveExcludeScene(const char *scene_name)
+{
+	exclude_scenes.erase(scene_name);
+	const auto scene = obs_frontend_get_current_scene();
+	const auto sn = obs_source_get_name(scene);
+	if (strcmp(sn, scene_name) == 0)
+		SceneChanged(sn);
+	obs_source_release(scene);
+}
+bool DownstreamKeyer::IsSceneExcluded(const char *scene_name)
+{
+	return exclude_scenes.find(scene_name) != exclude_scenes.end();
 }
 
 LockedCheckBox::LockedCheckBox() {}

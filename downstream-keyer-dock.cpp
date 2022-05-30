@@ -158,7 +158,7 @@ void DownstreamKeyerDock::ClearKeyers()
 
 void DownstreamKeyerDock::AddDefaultKeyer()
 {
-	if (outputChannel < 7  || outputChannel >= MAX_CHANNELS)
+	if (outputChannel < 7 || outputChannel >= MAX_CHANNELS)
 		outputChannel = 7;
 	auto keyer = new DownstreamKeyer(
 		outputChannel, QT_UTF8(obs_module_text("DefaultName")));
@@ -167,11 +167,14 @@ void DownstreamKeyerDock::AddDefaultKeyer()
 void DownstreamKeyerDock::SceneChanged()
 {
 	const int count = tabs->count();
+	const auto scene = obs_frontend_get_current_scene();
+	const auto scene_name = obs_source_get_name(scene);
 	for (int i = 0; i < count; i++) {
 		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
 		if (w)
-			w->SceneChanged();
+			w->SceneChanged(scene_name);
 	}
+	obs_source_release(scene);
 }
 
 void DownstreamKeyerDock::AddTransitionMenu(QMenu *tm,
@@ -227,13 +230,49 @@ void DownstreamKeyerDock::AddTransitionMenu(QMenu *tm,
 		if (w)
 			w->SetTransitionDuration(duration, transition_type);
 	};
-	connect(duration, (void (QSpinBox::*)(int)) & QSpinBox::valueChanged,
+	connect(duration, (void(QSpinBox::*)(int)) & QSpinBox::valueChanged,
 		setDuration);
 
 	QWidgetAction *durationAction = new QWidgetAction(tm);
 	durationAction->setDefaultWidget(duration);
 
 	tm->addAction(durationAction);
+}
+
+void DownstreamKeyerDock::AddExcludeSceneMenu(QMenu *tm)
+{
+	auto setSceneExclude = [this](std::string name, bool add) {
+		const auto w =
+			dynamic_cast<DownstreamKeyer *>(tabs->currentWidget());
+		if (w) {
+			if (add) {
+				w->AddExcludeScene(name.c_str());
+			} else {
+				w->RemoveExcludeScene(name.c_str());
+			}
+		}
+	};
+	const auto w = dynamic_cast<DownstreamKeyer *>(tabs->currentWidget());
+	struct obs_frontend_source_list scenes = {};
+	obs_frontend_get_scenes(&scenes);
+	for (size_t i = 0; i < scenes.sources.num; i++) {
+		obs_source_t *source = scenes.sources.array[i];
+		auto name = obs_source_get_name(scenes.sources.array[i]);
+		auto a = tm->addAction(QT_UTF8(name));
+
+		a->setCheckable(true);
+		bool excluded = false;
+		if (w) {
+			excluded = w->IsSceneExcluded(name);
+		}
+		a->setChecked(excluded);
+		excluded = !excluded;
+		connect(a, &QAction::triggered,
+			[setSceneExclude, name, excluded] {
+				return setSceneExclude(name, excluded);
+			});
+	}
+	obs_frontend_source_list_free(&scenes);
 }
 
 void DownstreamKeyerDock::ConfigClicked()
@@ -251,6 +290,8 @@ void DownstreamKeyerDock::ConfigClicked()
 	AddTransitionMenu(tm, transitionType::show);
 	tm = popup.addMenu(QT_UTF8(obs_module_text("HideTransition")));
 	AddTransitionMenu(tm, transitionType::hide);
+	tm = popup.addMenu(QT_UTF8(obs_module_text("ExcludeScene")));
+	AddExcludeSceneMenu(tm);
 	popup.exec(QCursor::pos());
 }
 
@@ -258,7 +299,7 @@ void DownstreamKeyerDock::Add()
 {
 	std::string name = obs_module_text("DefaultName");
 	if (NameDialog::AskForName(this, name)) {
-		if (outputChannel < 7  || outputChannel >= MAX_CHANNELS)
+		if (outputChannel < 7 || outputChannel >= MAX_CHANNELS)
 			outputChannel = 7;
 		auto keyer = new DownstreamKeyer(outputChannel + tabs->count(),
 						 QT_UTF8(name.c_str()));
