@@ -9,7 +9,7 @@
 #include <QSpinBox>
 #include <QToolBar>
 #include <QVBoxLayout>
-#include <../UI/obs-frontend-api/obs-frontend-api.h>
+#include <obs-frontend-api.h>
 
 #include "obs-module.h"
 
@@ -399,7 +399,7 @@ void DownstreamKeyer::SetTransition(const char *transition_name,
 		return;
 
 	obs_source_t *newTransition = nullptr;
-	obs_frontend_source_list transitions = {0};
+	obs_frontend_source_list transitions = {};
 	obs_frontend_get_transitions(&transitions);
 	for (size_t i = 0; i < transitions.sources.num; i++) {
 		const char *n =
@@ -630,6 +630,7 @@ void DownstreamKeyer::source_remove(void *data, calldata_t *calldata)
 bool DownstreamKeyer::enable_DSK_hotkey(void *data, obs_hotkey_pair_id id,
 					obs_hotkey_t *hotkey, bool pressed)
 {
+	UNUSED_PARAMETER(hotkey);
 	if (!pressed)
 		return false;
 	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
@@ -651,6 +652,7 @@ bool DownstreamKeyer::enable_DSK_hotkey(void *data, obs_hotkey_pair_id id,
 bool DownstreamKeyer::disable_DSK_hotkey(void *data, obs_hotkey_pair_id id,
 					 obs_hotkey_t *hotkey, bool pressed)
 {
+	UNUSED_PARAMETER(hotkey);
 	if (!pressed)
 		return false;
 	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
@@ -672,6 +674,8 @@ bool DownstreamKeyer::disable_DSK_hotkey(void *data, obs_hotkey_pair_id id,
 void DownstreamKeyer::null_hotkey(void *data, obs_hotkey_id id,
 				  obs_hotkey_t *hotkey, bool pressed)
 {
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
 	if (!pressed)
 		return;
 	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
@@ -683,6 +687,8 @@ void DownstreamKeyer::null_hotkey(void *data, obs_hotkey_id id,
 bool DownstreamKeyer::enable_tie_hotkey(void *data, obs_hotkey_pair_id id,
 					obs_hotkey_t *hotkey, bool pressed)
 {
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
 	if (!pressed)
 		return false;
 	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
@@ -694,6 +700,8 @@ bool DownstreamKeyer::enable_tie_hotkey(void *data, obs_hotkey_pair_id id,
 bool DownstreamKeyer::disable_tie_hotkey(void *data, obs_hotkey_pair_id id,
 					 obs_hotkey_t *hotkey, bool pressed)
 {
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
 	if (!pressed)
 		return false;
 	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);

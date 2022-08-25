@@ -44,6 +44,7 @@ static void output_source_destroy(void *data)
 
 static obs_properties_t *output_source_properties(void *data)
 {
+	UNUSED_PARAMETER(data);
 	obs_properties_t *ppts = obs_properties_create();
 	obs_properties_add_int(ppts, "channel", obs_module_text("Channel"), 0,
 			       MAX_CHANNELS - 1, 1);
@@ -52,10 +53,14 @@ static obs_properties_t *output_source_properties(void *data)
 	return ppts;
 }
 
-void output_source_defaults(obs_data_t *settings) {}
+void output_source_defaults(obs_data_t *settings)
+{
+	UNUSED_PARAMETER(settings);
+}
 
 static void output_source_video_render(void *data, gs_effect_t *effect)
 {
+	UNUSED_PARAMETER(effect);
 	struct output_source_context *context = data;
 	if (context->rendering || context->recurring ||
 	    !context->outputSource) {
@@ -96,6 +101,7 @@ static uint32_t output_source_getheight(void *data)
 static void check_recursion(obs_source_t *parent, obs_source_t *child,
 			    void *data)
 {
+	UNUSED_PARAMETER(parent);
 	struct output_source_context *context = data;
 	if (child == context->source) {
 		context->recurring = true;
@@ -104,6 +110,7 @@ static void check_recursion(obs_source_t *parent, obs_source_t *child,
 
 static void output_source_video_tick(void *data, float seconds)
 {
+	UNUSED_PARAMETER(seconds);
 	struct output_source_context *context = data;
 	obs_source_t *source = obs_get_output_source(context->channel);
 	if (!source) {

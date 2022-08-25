@@ -135,8 +135,9 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 		for (size_t i = 0; i < count; i++) {
 			auto keyerData = obs_data_array_item(keyers, i);
 			auto keyer = new DownstreamKeyer(
-				outputChannel + i, QT_UTF8(obs_data_get_string(
-							   keyerData, "name")));
+				(int)(outputChannel + i),
+				QT_UTF8(obs_data_get_string(keyerData,
+							    "name")));
 			keyer->Load(keyerData);
 			tabs->addTab(keyer, keyer->objectName());
 			obs_data_release(keyerData);
@@ -199,9 +200,9 @@ void DownstreamKeyerDock::AddTransitionMenu(QMenu *tm,
 	a->setCheckable(true);
 	a->setChecked(transition.empty());
 	connect(a, &QAction::triggered,
-		[setTransition, transition_type] { return setTransition(""); });
+		[setTransition] { return setTransition(""); });
 	tm->addSeparator();
-	obs_frontend_source_list transitions = {0};
+	obs_frontend_source_list transitions = {};
 	obs_frontend_get_transitions(&transitions);
 	for (size_t i = 0; i < transitions.sources.num; i++) {
 		const char *n =
@@ -257,7 +258,7 @@ void DownstreamKeyerDock::AddExcludeSceneMenu(QMenu *tm)
 	obs_frontend_get_scenes(&scenes);
 	for (size_t i = 0; i < scenes.sources.num; i++) {
 		obs_source_t *source = scenes.sources.array[i];
-		auto name = obs_source_get_name(scenes.sources.array[i]);
+		auto name = obs_source_get_name(source);
 		auto a = tm->addAction(QT_UTF8(name));
 
 		a->setCheckable(true);

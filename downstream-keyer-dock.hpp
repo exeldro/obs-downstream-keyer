@@ -3,7 +3,7 @@
 #include <qmenu.h>
 #include <QTabWidget>
 #include <QVBoxLayout>
-#include <../UI/obs-frontend-api/obs-frontend-api.h>
+#include <obs-frontend-api.h>
 #include "downstream-keyer.hpp"
 
 class DownstreamKeyerDock : public QDockWidget {
