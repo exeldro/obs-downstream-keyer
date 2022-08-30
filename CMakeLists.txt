@@ -8,6 +8,11 @@ endif()
 
 project(downstream-keyer VERSION 0.2.5)
 set(PROJECT_FULL_NAME "Downstream keyer")
+
+# Set new UUIDs when you start to create a new plugin.
+set(MACOS_PACKAGE_UUID "95568F40-B085-40C2-8F58-FF501E3CE94E")
+set(MACOS_INSTALLER_UUID "479B4485-E699-42CE-929D-7C9D9AC9C412")
+
 add_library(${PROJECT_NAME} MODULE)
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
