@@ -423,9 +423,8 @@ void DownstreamKeyer::SetTransition(const char *transition_name,
 		hideTransition = newTransition;
 	else
 		transition = newTransition;
-
-	if (oldTransition &&
-	    obs_get_output_source(outputChannel) == oldTransition) {
+	obs_source_t *prevSource = obs_get_output_source(outputChannel);
+	if (oldTransition && prevSource == oldTransition) {
 		if (newTransition) {
 			//swap transition
 			obs_transition_swap_begin(newTransition, oldTransition);
@@ -443,6 +442,7 @@ void DownstreamKeyer::SetTransition(const char *transition_name,
 			}
 		}
 	}
+	obs_source_release(prevSource);
 	if (oldTransition) {
 		obs_transition_clear(oldTransition);
 		obs_source_release(oldTransition);
