@@ -8,6 +8,8 @@
 
 #include "downstream-keyer.hpp"
 #include "name-dialog.hpp"
+#include "obs-websocket-api.h"
+#include "obs.hpp"
 #include "version.h"
 
 #define QT_UTF8(str) QString::fromUtf8(str)
@@ -19,6 +21,8 @@ OBS_MODULE_USE_DEFAULT_LOCALE("downstream-keyer", "en-US")
 
 MODULE_EXTERN struct obs_source_info output_source_info;
 
+DownstreamKeyerDock *_dsk;
+
 bool obs_module_load()
 {
 	blog(LOG_INFO, "[Downstream Keyer] loaded version %s", PROJECT_VERSION);
@@ -26,9 +30,15 @@ bool obs_module_load()
 	const auto main_window =
 		static_cast<QMainWindow *>(obs_frontend_get_main_window());
 	obs_frontend_push_ui_translation(obs_module_get_string);
-	obs_frontend_add_dock(new DownstreamKeyerDock(main_window));
+	_dsk = new DownstreamKeyerDock(main_window);
+	obs_frontend_add_dock(_dsk);
 	obs_frontend_pop_ui_translation();
 	return true;
+}
+
+void obs_module_post_load(void)
+{
+	_dsk->RegisterObsWebsocket();
 }
 
 void obs_module_unload() {}
@@ -136,8 +146,8 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 			auto keyerData = obs_data_array_item(keyers, i);
 			auto keyer = new DownstreamKeyer(
 				(int)(outputChannel + i),
-				QT_UTF8(obs_data_get_string(keyerData,
-							    "name")));
+				QT_UTF8(obs_data_get_string(keyerData, "name")),
+				vendor);
 			keyer->Load(keyerData);
 			tabs->addTab(keyer, keyer->objectName());
 			obs_data_release(keyerData);
@@ -162,7 +172,7 @@ void DownstreamKeyerDock::AddDefaultKeyer()
 	if (outputChannel < 7 || outputChannel >= MAX_CHANNELS)
 		outputChannel = 7;
 	auto keyer = new DownstreamKeyer(
-		outputChannel, QT_UTF8(obs_module_text("DefaultName")));
+		outputChannel, QT_UTF8(obs_module_text("DefaultName")), vendor);
 	tabs->addTab(keyer, keyer->objectName());
 }
 void DownstreamKeyerDock::SceneChanged()
@@ -303,7 +313,7 @@ void DownstreamKeyerDock::Add()
 		if (outputChannel < 7 || outputChannel >= MAX_CHANNELS)
 			outputChannel = 7;
 		auto keyer = new DownstreamKeyer(outputChannel + tabs->count(),
-						 QT_UTF8(name.c_str()));
+						 QT_UTF8(name.c_str()), vendor);
 		tabs->addTab(keyer, keyer->objectName());
 	}
 }
@@ -329,4 +339,62 @@ void DownstreamKeyerDock::Remove()
 	if (tabs->count() == 0) {
 		AddDefaultKeyer();
 	}
+}
+
+bool DownstreamKeyerDock::SwitchDSK(QString dskName, QString sceneName)
+{
+	const int count = tabs->count();
+	for (int i = 0; i < count; i++) {
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
+		if (w->objectName() == dskName) {
+			if (w->SwitchToScene(sceneName)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void DownstreamKeyerDock::RegisterObsWebsocket()
+{
+	vendor = obs_websocket_register_vendor("downstream-keyer");
+	if (!vendor)
+		return;
+	obs_websocket_vendor_register_request(vendor, "get_downstream_keyers",
+					      get_downstream_keyers, this);
+	obs_websocket_vendor_register_request(vendor, "dsk_select_scene",
+					      change_scene, this);
+}
+
+void DownstreamKeyerDock::get_downstream_keyers(obs_data_t *request_data,
+						obs_data_t *response_data,
+						void *param)
+{
+	UNUSED_PARAMETER(request_data);
+	auto *dsk = (DownstreamKeyerDock *)param;
+	dsk->Save(response_data);
+}
+
+void DownstreamKeyerDock::change_scene(obs_data_t *request_data,
+				       obs_data_t *response_data, void *param)
+{
+	auto *dsk = static_cast<DownstreamKeyerDock *>(param);
+	const char *dsk_name = obs_data_get_string(request_data, "dsk_name");
+	const char *scene_name = obs_data_get_string(request_data, "scene");
+	if (!scene_name) {
+		obs_data_set_string(response_data, "error", "'scene' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	if (dsk_name && strlen(dsk_name)) {
+		obs_data_set_bool(
+			response_data, "success",
+			dsk->SwitchDSK(QString::fromUtf8(dsk_name),
+				       QString::fromUtf8(scene_name)));
+		return;
+	} else {
+		obs_data_set_string(response_data, "error",
+				    "'dsk_name' not set");
+	}
+	obs_data_set_bool(response_data, "success", false);
 }

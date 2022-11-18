@@ -16,14 +16,16 @@
 #define QT_UTF8(str) QString::fromUtf8(str)
 #define QT_TO_UTF8(str) str.toUtf8().constData()
 
-DownstreamKeyer::DownstreamKeyer(int channel, QString name)
+DownstreamKeyer::DownstreamKeyer(int channel, QString name,
+				 obs_websocket_vendor vendor)
 	: outputChannel(channel),
 	  transition(nullptr),
 	  showTransition(nullptr),
 	  hideTransition(nullptr),
 	  transitionDuration(300),
 	  showTransitionDuration(300),
-	  hideTransitionDuration(300)
+	  hideTransitionDuration(300),
+	  vendor(vendor)
 {
 	setObjectName(name);
 	auto layout = new QVBoxLayout(this);
@@ -265,16 +267,37 @@ void DownstreamKeyer::apply_source(obs_source_t *const newSource)
 	}
 	if (prevSource == newSource) {
 		//skip if nothing changed
-	} else if (!newTransition) {
-		obs_set_output_source(outputChannel, newSource);
 	} else {
-		obs_transition_set(newTransition, prevSource);
+		if (!newTransition) {
+			obs_set_output_source(outputChannel, newSource);
+		} else {
+			obs_transition_set(newTransition, prevSource);
 
-		obs_transition_start(newTransition, OBS_TRANSITION_MODE_AUTO,
-				     newTransitionDuration, newSource);
+			obs_transition_start(newTransition,
+					     OBS_TRANSITION_MODE_AUTO,
+					     newTransitionDuration, newSource);
 
-		if (prevTransition != newTransition)
-			obs_set_output_source(outputChannel, newTransition);
+			if (prevTransition != newTransition)
+				obs_set_output_source(outputChannel,
+						      newTransition);
+		}
+		if (vendor) {
+			const auto data = obs_data_create();
+			obs_data_set_string(data, "dsk_name",
+					    QT_TO_UTF8(objectName()));
+			obs_data_set_int(data, "dsk_channel", outputChannel);
+			obs_data_set_string(
+				data, "new_scene",
+				newSource ? obs_source_get_name(newSource)
+					  : "");
+			obs_data_set_string(
+				data, "old_scene",
+				prevSource ? obs_source_get_name(prevSource)
+					   : "");
+			obs_websocket_vendor_emit_event(
+				vendor, "dsk_scene_changed", data);
+			obs_data_release(data);
+		}
 	}
 
 	obs_source_release(prevSource);
@@ -733,6 +756,26 @@ void DownstreamKeyer::RemoveExcludeScene(const char *scene_name)
 bool DownstreamKeyer::IsSceneExcluded(const char *scene_name)
 {
 	return exclude_scenes.find(scene_name) != exclude_scenes.end();
+}
+
+bool DownstreamKeyer::SwitchToScene(QString scene_name)
+{
+	if (scene_name.isEmpty()) {
+		on_actionSceneNull_triggered();
+		return true;
+	}
+	for (int i = 0; i < scenesList->count(); i++) {
+		const auto item = scenesList->item(i);
+		if (!item)
+			continue;
+		if (item->text() == scene_name) {
+			if (!item->isSelected()) {
+				item->setSelected(true);
+			}
+			return true;
+		}
+	}
+	return false;
 }
 
 LockedCheckBox::LockedCheckBox() {}

@@ -9,6 +9,7 @@
 #include <QWidget>
 #include <set>
 
+#include "obs-websocket-api.h"
 #include "obs.h"
 
 class LockedCheckBox : public QCheckBox {
@@ -38,6 +39,7 @@ private:
 	obs_hotkey_id null_hotkey_id;
 	obs_hotkey_pair_id tie_hotkey_id;
 	std::set<std::string> exclude_scenes;
+	obs_websocket_vendor vendor;
 
 	static void source_rename(void *data, calldata_t *calldata);
 	static void source_remove(void *data, calldata_t *calldata);
@@ -68,7 +70,7 @@ private slots:
 signals:
 
 public:
-	DownstreamKeyer(int channel, QString name);
+	DownstreamKeyer(int channel, QString name, obs_websocket_vendor vendor);
 	~DownstreamKeyer();
 
 	void Save(obs_data_t *data);
@@ -83,4 +85,5 @@ public:
 	void AddExcludeScene(const char *scene_name);
 	void RemoveExcludeScene(const char *scene_name);
 	bool IsSceneExcluded(const char *scene_name);
+	bool SwitchToScene(QString scene_name);
 };

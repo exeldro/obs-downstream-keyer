@@ -6,7 +6,7 @@ else()
   cmake_minimum_required(VERSION 3.18)
 endif()
 
-project(downstream-keyer VERSION 0.2.5)
+project(downstream-keyer VERSION 0.2.6)
 set(PROJECT_FULL_NAME "Downstream keyer")
 
 # Set new UUIDs when you start to create a new plugin.
@@ -25,6 +25,7 @@ target_sources(${PROJECT_NAME} PRIVATE
 	downstream-keyer-dock.hpp
 	downstream-keyer.hpp
 	name-dialog.hpp
+	obs-websocket-api.h
 	version.h)
 
 if(BUILD_OUT_OF_TREE)
