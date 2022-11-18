@@ -197,12 +197,20 @@ void DownstreamKeyer::on_actionAddScene_triggered()
 		std::string enable_hotkey = obs_module_text("EnableDSK");
 		enable_hotkey += " ";
 		enable_hotkey += QT_TO_UTF8(objectName());
+		std::string enable_hotkey_name = QT_TO_UTF8(objectName());
+		enable_hotkey_name += ".";
+		enable_hotkey_name += QT_TO_UTF8(sceneName);
+		enable_hotkey_name += ".enable";
 		std::string disable_hotkey = obs_module_text("DisableDSK");
 		disable_hotkey += " ";
 		disable_hotkey += QT_TO_UTF8(objectName());
+		std::string disable_hotkey_name = QT_TO_UTF8(objectName());
+		disable_hotkey_name += ".";
+		disable_hotkey_name += QT_TO_UTF8(sceneName);
+		disable_hotkey_name += ".disable";
 		uint64_t h = obs_hotkey_pair_register_source(
-			scene, enable_hotkey.c_str(), enable_hotkey.c_str(),
-			disable_hotkey.c_str(), disable_hotkey.c_str(),
+			scene, enable_hotkey_name.c_str(), enable_hotkey.c_str(),
+			disable_hotkey_name.c_str(), disable_hotkey.c_str(), 
 			enable_DSK_hotkey, disable_DSK_hotkey, this, this);
 
 		if (h != OBS_INVALID_HOTKEY_PAIR_ID) {
