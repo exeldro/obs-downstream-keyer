@@ -193,23 +193,7 @@ void DownstreamKeyer::on_actionAddScene_triggered()
 	auto sceneName = QT_UTF8(obs_source_get_name(scene));
 	if (scenesList->findItems(sceneName, Qt::MatchFixedString).count() ==
 	    0) {
-		const auto item = new QListWidgetItem(sceneName);
-		scenesList->addItem(item);
-
-		std::string enable_hotkey = obs_module_text("EnableDSK");
-		enable_hotkey += " ";
-		enable_hotkey += QT_TO_UTF8(objectName());
-		std::string disable_hotkey = obs_module_text("DisableDSK");
-		disable_hotkey += " ";
-		disable_hotkey += QT_TO_UTF8(objectName());
-		uint64_t h = obs_hotkey_pair_register_source(
-			scene, enable_hotkey.c_str(), enable_hotkey.c_str(),
-			disable_hotkey.c_str(), disable_hotkey.c_str(),
-			enable_DSK_hotkey, disable_DSK_hotkey, this, this);
-
-		if (h != OBS_INVALID_HOTKEY_PAIR_ID) {
-			item->setData(Qt::UserRole, static_cast<uint>(h));
-		}
+		add_scene(sceneName, scene);
 	}
 
 	obs_source_release(scene);
@@ -736,6 +720,8 @@ bool DownstreamKeyer::disable_tie_hotkey(void *data, obs_hotkey_pair_id id,
 
 void DownstreamKeyer::AddExcludeScene(const char *scene_name)
 {
+	if (exclude_scenes.count(scene_name) > 0)
+		return;
 	exclude_scenes.emplace(scene_name);
 	const auto scene = obs_frontend_get_current_scene();
 	const auto sn = obs_source_get_name(scene);
@@ -776,6 +762,74 @@ bool DownstreamKeyer::SwitchToScene(QString scene_name)
 		}
 	}
 	return false;
+}
+
+void DownstreamKeyer::add_scene(QString scene_name, obs_source_t *s)
+{
+	const auto item = new QListWidgetItem(scene_name);
+	scenesList->addItem(item);
+
+	std::string enable_hotkey = obs_module_text("EnableDSK");
+	enable_hotkey += " ";
+	enable_hotkey += QT_TO_UTF8(objectName());
+	std::string disable_hotkey = obs_module_text("DisableDSK");
+	disable_hotkey += " ";
+	disable_hotkey += QT_TO_UTF8(objectName());
+	uint64_t h = obs_hotkey_pair_register_source(
+		s, enable_hotkey.c_str(), enable_hotkey.c_str(),
+		disable_hotkey.c_str(), disable_hotkey.c_str(),
+		enable_DSK_hotkey, disable_DSK_hotkey, this, this);
+
+	if (h != OBS_INVALID_HOTKEY_PAIR_ID) {
+		item->setData(Qt::UserRole, static_cast<uint>(h));
+	}
+}
+
+bool DownstreamKeyer::AddScene(QString scene_name)
+{
+	if (scene_name.isEmpty()) {
+		return false;
+	}
+	if (scenesList->findItems(scene_name, Qt::MatchFixedString).count() !=
+	    0) {
+		return true;
+	}
+	auto nameUtf8 = scene_name.toUtf8();
+	auto name = nameUtf8.constData();
+	auto s = obs_get_source_by_name(name);
+	if (obs_source_is_scene(s)) {
+
+		add_scene(scene_name, s);
+		obs_source_release(s);
+		return true;
+	}
+	obs_source_release(s);
+	return false;
+}
+
+bool DownstreamKeyer::RemoveScene(QString scene_name)
+{
+	if (scene_name.isEmpty()) {
+		return false;
+	}
+	for (int i = 0; i < scenesList->count(); i++) {
+		const auto item = scenesList->item(i);
+		if (!item)
+			continue;
+
+		if (item->text() == scene_name) {
+			scenesList->removeItemWidget(item);
+			obs_hotkey_pair_unregister(
+				item->data(Qt::UserRole).toUInt());
+			return true;
+		}
+	}
+	return false;
+}
+
+void DownstreamKeyer::SetTie(bool tie)
+{
+	this->tie->setChecked(tie);
 }
 
 LockedCheckBox::LockedCheckBox() {}

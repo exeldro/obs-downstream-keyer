@@ -106,6 +106,18 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent)
 
 DownstreamKeyerDock::~DownstreamKeyerDock()
 {
+	obs_websocket_vendor_unregister_request(vendor,
+						"get_downstream_keyers");
+	obs_websocket_vendor_unregister_request(vendor, "get_downstream_keyer");
+	obs_websocket_vendor_unregister_request(vendor, "dsk_select_scene");
+	obs_websocket_vendor_unregister_request(vendor, "dsk_add_scene");
+	obs_websocket_vendor_unregister_request(vendor, "dsk_remove_scene");
+	obs_websocket_vendor_unregister_request(vendor, "dsk_set_tie");
+	obs_websocket_vendor_unregister_request(vendor, "dsk_set_transition");
+	obs_websocket_vendor_unregister_request(vendor,
+						"dsk_add_exclude_scene");
+	obs_websocket_vendor_unregister_request(vendor,
+						"dsk_remove_exclude_scene");
 	obs_frontend_remove_save_callback(frontend_save_load, this);
 	obs_frontend_remove_event_callback(frontend_event, this);
 	ClearKeyers();
@@ -355,6 +367,91 @@ bool DownstreamKeyerDock::SwitchDSK(QString dskName, QString sceneName)
 	return false;
 }
 
+bool DownstreamKeyerDock::AddScene(QString dskName, QString sceneName)
+{
+	const int count = tabs->count();
+	for (int i = 0; i < count; i++) {
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
+		if (w->objectName() == dskName) {
+			if (w->AddScene(sceneName)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool DownstreamKeyerDock::RemoveScene(QString dskName, QString sceneName)
+{
+	const int count = tabs->count();
+	for (int i = 0; i < count; i++) {
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
+		if (w->objectName() == dskName) {
+			if (w->RemoveScene(sceneName)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool DownstreamKeyerDock::SetTie(QString dskName, bool tie)
+{
+	const int count = tabs->count();
+	for (int i = 0; i < count; i++) {
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
+		if (w->objectName() == dskName) {
+			w->SetTie(tie);
+			return true;
+		}
+	}
+	return false;
+}
+
+bool DownstreamKeyerDock::SetTransition(const QString &dskName,
+					const char *transition, int duration,
+					transitionType tt)
+{
+	const int count = tabs->count();
+	for (int i = 0; i < count; i++) {
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
+		if (w->objectName() == dskName) {
+			w->SetTransition(transition, tt);
+			w->SetTransitionDuration(duration, tt);
+			return true;
+		}
+	}
+	return false;
+}
+
+bool DownstreamKeyerDock::AddExcludeScene(QString dskName,
+					  const char *sceneName)
+{
+	const int count = tabs->count();
+	for (int i = 0; i < count; i++) {
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
+		if (w->objectName() == dskName) {
+			w->AddExcludeScene(sceneName);
+			return true;
+		}
+	}
+	return false;
+}
+
+bool DownstreamKeyerDock::RemoveExcludeScene(QString dskName,
+					     const char *sceneName)
+{
+	const int count = tabs->count();
+	for (int i = 0; i < count; i++) {
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
+		if (w->objectName() == dskName) {
+			w->RemoveExcludeScene(sceneName);
+			return true;
+		}
+	}
+	return false;
+}
+
 void DownstreamKeyerDock::RegisterObsWebsocket()
 {
 	vendor = obs_websocket_register_vendor("downstream-keyer");
@@ -362,8 +459,22 @@ void DownstreamKeyerDock::RegisterObsWebsocket()
 		return;
 	obs_websocket_vendor_register_request(vendor, "get_downstream_keyers",
 					      get_downstream_keyers, this);
+	obs_websocket_vendor_register_request(vendor, "get_downstream_keyer",
+					      get_downstream_keyer, this);
 	obs_websocket_vendor_register_request(vendor, "dsk_select_scene",
 					      change_scene, this);
+	obs_websocket_vendor_register_request(vendor, "dsk_add_scene",
+					      add_scene, this);
+	obs_websocket_vendor_register_request(vendor, "dsk_remove_scene",
+					      remove_scene, this);
+	obs_websocket_vendor_register_request(vendor, "dsk_set_tie", set_tie,
+					      this);
+	obs_websocket_vendor_register_request(vendor, "dsk_set_transition",
+					      set_transition, this);
+	obs_websocket_vendor_register_request(vendor, "dsk_add_exclude_scene",
+					      add_exclude_scene, this);
+	obs_websocket_vendor_register_request(
+		vendor, "dsk_remove_exclude_scene", remove_exclude_scene, this);
 }
 
 void DownstreamKeyerDock::get_downstream_keyers(obs_data_t *request_data,
@@ -373,6 +484,33 @@ void DownstreamKeyerDock::get_downstream_keyers(obs_data_t *request_data,
 	UNUSED_PARAMETER(request_data);
 	auto *dsk = (DownstreamKeyerDock *)param;
 	dsk->Save(response_data);
+}
+
+void DownstreamKeyerDock::get_downstream_keyer(obs_data_t *request_data,
+					       obs_data_t *response_data,
+					       void *param)
+{
+	auto *dsk = (DownstreamKeyerDock *)param;
+	const char *dsk_name = obs_data_get_string(request_data, "dsk_name");
+	if (!dsk_name || !strlen(dsk_name)) {
+		obs_data_set_string(response_data, "error",
+				    "'dsk_name' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	QString dskName = QString::fromUtf8(dsk_name);
+	const int count = dsk->tabs->count();
+	for (int i = 0; i < count; i++) {
+		auto w = dynamic_cast<DownstreamKeyer *>(dsk->tabs->widget(i));
+		if (w->objectName() == dskName) {
+			obs_data_set_bool(response_data, "success", true);
+			w->Save(response_data);
+			return;
+		}
+	}
+	obs_data_set_bool(response_data, "success", false);
+	obs_data_set_string(response_data, "error",
+			    "No downstream keyer with that name found");
 }
 
 void DownstreamKeyerDock::change_scene(obs_data_t *request_data,
@@ -386,15 +524,159 @@ void DownstreamKeyerDock::change_scene(obs_data_t *request_data,
 		obs_data_set_bool(response_data, "success", false);
 		return;
 	}
-	if (dsk_name && strlen(dsk_name)) {
-		obs_data_set_bool(
-			response_data, "success",
-			dsk->SwitchDSK(QString::fromUtf8(dsk_name),
-				       QString::fromUtf8(scene_name)));
-		return;
-	} else {
+	if (!dsk_name || !strlen(dsk_name)) {
 		obs_data_set_string(response_data, "error",
 				    "'dsk_name' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
 	}
-	obs_data_set_bool(response_data, "success", false);
+	obs_data_set_bool(response_data, "success",
+			  dsk->SwitchDSK(QString::fromUtf8(dsk_name),
+					 QString::fromUtf8(scene_name)));
+}
+
+void DownstreamKeyerDock::add_scene(obs_data_t *request_data,
+				    obs_data_t *response_data, void *param)
+{
+	auto *dsk = static_cast<DownstreamKeyerDock *>(param);
+	const char *dsk_name = obs_data_get_string(request_data, "dsk_name");
+	const char *scene_name = obs_data_get_string(request_data, "scene");
+	if (!scene_name || !strlen(scene_name)) {
+		obs_data_set_string(response_data, "error", "'scene' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	if (!dsk_name || !strlen(dsk_name)) {
+		obs_data_set_string(response_data, "error",
+				    "'dsk_name' not set");
+
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	obs_data_set_bool(response_data, "success",
+			  dsk->AddScene(QString::fromUtf8(dsk_name),
+					QString::fromUtf8(scene_name)));
+}
+
+void DownstreamKeyerDock::remove_scene(obs_data_t *request_data,
+				       obs_data_t *response_data, void *param)
+{
+	auto *dsk = static_cast<DownstreamKeyerDock *>(param);
+	const char *dsk_name = obs_data_get_string(request_data, "dsk_name");
+	const char *scene_name = obs_data_get_string(request_data, "scene");
+	if (!scene_name || !strlen(scene_name)) {
+		obs_data_set_string(response_data, "error", "'scene' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	if (!dsk_name || !strlen(dsk_name)) {
+		obs_data_set_string(response_data, "error",
+				    "'dsk_name' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	obs_data_set_bool(response_data, "success",
+			  dsk->RemoveScene(QString::fromUtf8(dsk_name),
+					   QString::fromUtf8(scene_name)));
+}
+
+void DownstreamKeyerDock::set_tie(obs_data_t *request_data,
+				  obs_data_t *response_data, void *param)
+{
+	auto *dsk = static_cast<DownstreamKeyerDock *>(param);
+	const char *dsk_name = obs_data_get_string(request_data, "dsk_name");
+	if (!obs_data_has_user_value(request_data, "tie")) {
+		obs_data_set_string(response_data, "error", "'tie' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	const bool tie = obs_data_get_bool(request_data, "tie");
+	if (!dsk_name || !strlen(dsk_name)) {
+		obs_data_set_string(response_data, "error",
+				    "'dsk_name' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	obs_data_set_bool(response_data, "success",
+			  dsk->SetTie(QString::fromUtf8(dsk_name), tie));
+}
+
+void DownstreamKeyerDock::set_transition(obs_data_t *request_data,
+					 obs_data_t *response_data, void *param)
+{
+	auto *dsk = static_cast<DownstreamKeyerDock *>(param);
+	const char *dsk_name = obs_data_get_string(request_data, "dsk_name");
+	const char *transition =
+		obs_data_get_string(request_data, "transition");
+	const char *transition_type =
+		obs_data_get_string(request_data, "transition_type");
+	long long duration =
+		obs_data_get_int(request_data, "transition_duration");
+
+	transitionType tt;
+	if (strcmp(transition_type, "show") == 0 ||
+	    strcmp(transition_type, "Show") == 0) {
+		tt = transitionType::show;
+	} else if (strcmp(transition_type, "hide") == 0 ||
+		   strcmp(transition_type, "Hide") == 0) {
+		tt = transitionType::hide;
+	} else {
+		tt = transitionType::match;
+	}
+
+	if (!dsk_name || !strlen(dsk_name)) {
+		obs_data_set_string(response_data, "error",
+				    "'dsk_name' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	dsk->SetTransition(QString::fromUtf8(dsk_name), transition, duration,
+			   tt);
+	obs_data_set_bool(response_data, "success", true);
+}
+
+void DownstreamKeyerDock::add_exclude_scene(obs_data_t *request_data,
+					    obs_data_t *response_data,
+					    void *param)
+{
+	auto *dsk = static_cast<DownstreamKeyerDock *>(param);
+	const char *dsk_name = obs_data_get_string(request_data, "dsk_name");
+	const char *scene_name = obs_data_get_string(request_data, "scene");
+	if (!scene_name || !strlen(scene_name)) {
+		obs_data_set_string(response_data, "error", "'scene' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	if (!dsk_name || !strlen(dsk_name)) {
+		obs_data_set_string(response_data, "error",
+				    "'dsk_name' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	obs_data_set_bool(response_data, "success",
+			  dsk->AddExcludeScene(QString::fromUtf8(dsk_name),
+					       scene_name));
+}
+
+void DownstreamKeyerDock::remove_exclude_scene(obs_data_t *request_data,
+					       obs_data_t *response_data,
+					       void *param)
+{
+	auto *dsk = static_cast<DownstreamKeyerDock *>(param);
+	const char *dsk_name = obs_data_get_string(request_data, "dsk_name");
+	const char *scene_name = obs_data_get_string(request_data, "scene");
+	if (!scene_name || !strlen(scene_name)) {
+		obs_data_set_string(response_data, "error", "'scene' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	if (!dsk_name || !strlen(dsk_name)) {
+		obs_data_set_string(response_data, "error",
+				    "'dsk_name' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	obs_data_set_bool(response_data, "success",
+			  dsk->RemoveExcludeScene(QString::fromUtf8(dsk_name),
+						  scene_name));
 }

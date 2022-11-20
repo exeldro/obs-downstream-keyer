@@ -86,4 +86,8 @@ public:
 	void RemoveExcludeScene(const char *scene_name);
 	bool IsSceneExcluded(const char *scene_name);
 	bool SwitchToScene(QString scene_name);
+	void add_scene(QString scene_name, obs_source_t *s);
+	bool AddScene(QString scene_name);
+	bool RemoveScene(QString scene_name);
+	void SetTie(bool tie);
 };
