@@ -20,7 +20,7 @@ public:
 	explicit LockedCheckBox(QWidget *parent);
 };
 
-enum transitionType { match, show, hide };
+enum transitionType { match, show, hide, override };
 
 class DownstreamKeyer : public QWidget {
 	Q_OBJECT
@@ -30,11 +30,13 @@ private:
 	obs_source_t *transition;
 	obs_source_t *showTransition;
 	obs_source_t *hideTransition;
+	obs_source_t *overrideTransition;
 	QListWidget *scenesList;
 	QToolBar *scenesToolbar;
 	uint32_t transitionDuration;
 	uint32_t showTransitionDuration;
 	uint32_t hideTransitionDuration;
+	uint32_t overrideTransitionDuration;
 	LockedCheckBox *tie;
 	obs_hotkey_id null_hotkey_id;
 	obs_hotkey_pair_id tie_hotkey_id;

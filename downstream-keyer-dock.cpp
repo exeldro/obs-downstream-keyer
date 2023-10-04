@@ -191,7 +191,7 @@ void DownstreamKeyerDock::SceneChanged()
 {
 	const int count = tabs->count();
 	const auto scene = obs_frontend_get_current_scene();
-	const auto scene_name = obs_source_get_name(scene);
+	std::string scene_name = scene ? obs_source_get_name(scene) : "";
 	for (int i = 0; i < count; i++) {
 		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
 		if (w)

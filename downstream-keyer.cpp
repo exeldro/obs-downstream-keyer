@@ -22,6 +22,7 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name,
 	  transition(nullptr),
 	  showTransition(nullptr),
 	  hideTransition(nullptr),
+	  overrideTransition(nullptr),
 	  transitionDuration(300),
 	  showTransitionDuration(300),
 	  hideTransitionDuration(300),
@@ -171,6 +172,11 @@ DownstreamKeyer::~DownstreamKeyer()
 		obs_source_release(hideTransition);
 		hideTransition = nullptr;
 	}
+	if (overrideTransition) {
+		obs_transition_clear(overrideTransition);
+		obs_source_release(overrideTransition);
+		overrideTransition = nullptr;
+	}
 	const auto sh = obs_get_signal_handler();
 	signal_handler_disconnect(sh, "source_rename", source_rename, this);
 	signal_handler_disconnect(sh, "source_remove", source_remove, this);
@@ -246,8 +252,28 @@ void DownstreamKeyer::apply_source(obs_source_t *const newSource)
 	} else if (prevSource && !newSource && hideTransition) {
 		newTransition = hideTransition;
 		newTransitionDuration = hideTransitionDuration;
-	} else if (transition) {
-		newTransition = transition;
+	} else {
+		auto ph = obs_get_proc_handler();
+		calldata_t cd = {0};
+		calldata_set_string(&cd, "from_scene",
+				    obs_source_get_name(prevSource));
+		calldata_set_string(&cd, "to_scene",
+				    obs_source_get_name(newSource));
+		if (proc_handler_call(ph, "get_transition_table_transition",
+				      &cd)) {
+			const char *p = calldata_string(&cd, "transition");
+			SetTransition(p ? p : "", transitionType::override);
+			SetTransitionDuration(calldata_int(&cd, "duration"),
+					      transitionType::override);
+		} else {
+			SetTransition("", transitionType::override);
+		}
+		calldata_free(&cd);
+		if (overrideTransition) {
+			newTransition = overrideTransition;
+			newTransitionDuration = overrideTransitionDuration;
+		} else if (transition)
+			newTransition = transition;
 	}
 	if (prevSource == newSource) {
 		//skip if nothing changed
@@ -390,6 +416,8 @@ std::string DownstreamKeyer::GetTransition(enum transitionType transition_type)
 		return obs_source_get_name(showTransition);
 	if (transition_type == transitionType::hide && hideTransition)
 		return obs_source_get_name(hideTransition);
+	if (transition_type == transitionType::override && overrideTransition)
+		return obs_source_get_name(overrideTransition);
 	return "";
 }
 
@@ -401,6 +429,8 @@ void DownstreamKeyer::SetTransition(const char *transition_name,
 		oldTransition = showTransition;
 	else if (transition_type == transitionType::hide)
 		oldTransition = hideTransition;
+	else if (transition_type == transitionType::override)
+		oldTransition = overrideTransition;
 
 	if (!oldTransition && (!transition_name || !strlen(transition_name)))
 		return;
@@ -428,6 +458,8 @@ void DownstreamKeyer::SetTransition(const char *transition_name,
 		showTransition = newTransition;
 	else if (transition_type == transitionType::hide)
 		hideTransition = newTransition;
+	else if (transition_type == transitionType::override)
+		overrideTransition = newTransition;
 	else
 		transition = newTransition;
 	obs_source_t *prevSource = obs_get_output_source(outputChannel);
@@ -465,6 +497,8 @@ void DownstreamKeyer::SetTransitionDuration(int duration,
 		showTransitionDuration = duration;
 	else if (transition_type == transitionType::hide)
 		hideTransitionDuration = duration;
+	else if (transition_type == transitionType::override)
+		overrideTransitionDuration = duration;
 }
 
 int DownstreamKeyer::GetTransitionDuration(enum transitionType transition_type)
@@ -473,6 +507,8 @@ int DownstreamKeyer::GetTransitionDuration(enum transitionType transition_type)
 		return showTransitionDuration;
 	if (transition_type == transitionType::hide)
 		return hideTransitionDuration;
+	if (transition_type == transitionType::override)
+		return overrideTransitionDuration;
 	return transitionDuration;
 }
 
