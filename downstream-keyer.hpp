@@ -12,6 +12,9 @@
 #include "obs-websocket-api.h"
 #include "obs.h"
 
+typedef void (*get_transitions_callback_t)(
+	void *data, struct obs_frontend_source_list *sources);
+
 class LockedCheckBox : public QCheckBox {
 	Q_OBJECT
 
@@ -41,7 +44,9 @@ private:
 	obs_hotkey_id null_hotkey_id;
 	obs_hotkey_pair_id tie_hotkey_id;
 	std::set<std::string> exclude_scenes;
-	obs_websocket_vendor vendor;
+	obs_view_t *view = nullptr;
+	get_transitions_callback_t get_transitions = nullptr;
+	void *get_transitions_data = nullptr;
 
 	static void source_rename(void *data, calldata_t *calldata);
 	static void source_remove(void *data, calldata_t *calldata);
@@ -72,7 +77,9 @@ private slots:
 signals:
 
 public:
-	DownstreamKeyer(int channel, QString name, obs_websocket_vendor vendor);
+	DownstreamKeyer(int channel, QString name, obs_view_t *view = nullptr,
+			get_transitions_callback_t get_transitions = nullptr,
+			void *get_transitions_data = nullptr);
 	~DownstreamKeyer();
 
 	void Save(obs_data_t *data);
