@@ -99,4 +99,5 @@ public:
 	bool AddScene(QString scene_name);
 	bool RemoveScene(QString scene_name);
 	void SetTie(bool tie);
+	void SetOutputChannel(int outputChannel);
 };

@@ -975,6 +975,68 @@ void DownstreamKeyer::SetTie(bool tie)
 	this->tie->setChecked(tie);
 }
 
+void DownstreamKeyer::SetOutputChannel(int oc)
+{
+	if (oc == outputChannel)
+		return;
+	obs_source_t *prevSource =
+		view ? obs_view_get_source(view, outputChannel)
+		     : obs_get_output_source(outputChannel);
+	obs_source_t *prevTransition = nullptr;
+	if (prevSource &&
+	    obs_source_get_type(prevSource) == OBS_SOURCE_TYPE_TRANSITION) {
+		prevTransition = prevSource;
+		prevSource = obs_transition_get_active_source(prevSource);
+	}
+	if (prevTransition) {
+		if (prevTransition == transition ||
+		    prevTransition == showTransition ||
+		    prevTransition == hideTransition ||
+		    prevTransition == overrideTransition) {
+			if (view) {
+				obs_view_set_source(view, outputChannel,
+						    nullptr);
+			} else {
+				obs_set_output_source(outputChannel, nullptr);
+			}
+		} else {
+			obs_source_release(prevTransition);
+			prevTransition = nullptr;
+		}
+	} else if (prevSource) {
+		const auto l = scenesList->selectedItems();
+		const auto newSource =
+			l.count() ? obs_get_source_by_name(
+					    QT_TO_UTF8(l.value(0)->text()))
+				  : nullptr;
+		if (prevSource == newSource) {
+			if (view) {
+				obs_view_set_source(view, outputChannel,
+						    nullptr);
+			} else {
+				obs_set_output_source(outputChannel, nullptr);
+			}
+			obs_source_release(newSource);
+		} else {
+			obs_source_release(prevSource);
+			prevSource = newSource;
+		}
+	}
+	outputChannel = oc;
+	if (prevTransition) {
+		if (view) {
+			obs_view_set_source(view, outputChannel,
+					    prevTransition);
+		} else {
+			obs_set_output_source(outputChannel, prevTransition);
+		}
+	} else {
+		apply_selected_source();
+	}
+	obs_source_release(prevSource);
+	obs_source_release(prevTransition);
+}
+
 LockedCheckBox::LockedCheckBox() {}
 
 LockedCheckBox::LockedCheckBox(QWidget *parent) : QCheckBox(parent) {}

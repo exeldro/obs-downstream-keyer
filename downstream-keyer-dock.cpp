@@ -234,6 +234,15 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v,
 	tabs = new QTabWidget(this);
 	tabs->setMovable(true);
 
+	connect(tabs->tabBar(), &QTabBar::tabMoved, tabs->tabBar(), [this]() {
+		int count = tabs->count();
+		for (int i = 0; i < count; i++) {
+			auto w = dynamic_cast<DownstreamKeyer *>(
+				tabs->widget(i));
+			w->SetOutputChannel(outputChannel + i);
+		}
+	});
+
 	auto config = new QPushButton(this);
 	config->setProperty("themeID", "configIconSmall");
 
