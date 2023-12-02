@@ -76,8 +76,13 @@ static void proc_remove_view(void *data, calldata_t *cd)
 		return;
 	if (_dsks.find(viewName) != _dsks.end())
 		return;
-
+#if LIBOBS_API_VER >= MAKE_SEMANTIC_VERSION(30, 0, 0)
+	std::string name = viewName;
+	name += "DownstreamKeyerDock";
+	obs_frontend_remove_dock(name.c_str());
+#else
 	delete _dsks[viewName];
+#endif
 	_dsks.erase(viewName);
 }
 
@@ -155,6 +160,9 @@ void obs_module_post_load(void)
 void obs_module_unload()
 {
 	_dsks.clear();
+#if LIBOBS_API_VER >= MAKE_SEMANTIC_VERSION(30, 0, 0)
+	obs_frontend_remove_dock("DownstreamKeyerDock");
+#endif
 	if (!vendor || !obs_get_module("obs-websocket"))
 		return;
 	obs_websocket_vendor_unregister_request(vendor,
