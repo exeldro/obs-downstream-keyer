@@ -45,8 +45,7 @@ private slots:
 	void Remove();
 
 public:
-	DownstreamKeyerDock(QWidget *parent = nullptr,
-			    int outputChannel = 7,
+	DownstreamKeyerDock(QWidget *parent = nullptr, int outputChannel = 7,
 			    obs_view_t *view = nullptr,
 			    const char *view_name = nullptr,
 			    get_transitions_callback_t get_transitions = nullptr,

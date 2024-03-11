@@ -30,11 +30,13 @@ const char *get_view_name(size_t idx);
 obs_view_t *get_view_by_name(const char *view_name);
 };
 
-size_t get_view_count() {
+size_t get_view_count()
+{
 	return _dsks.size();
 }
 
-const char* get_view_name(size_t idx) {
+const char *get_view_name(size_t idx)
+{
 	size_t i = 0;
 	for (auto it = _dsks.begin(); it != _dsks.end(); it++) {
 		if (i == idx) {
@@ -45,7 +47,8 @@ const char* get_view_name(size_t idx) {
 	return NULL;
 }
 
-obs_view_t* get_view_by_name(const char* view_name) {
+obs_view_t *get_view_by_name(const char *view_name)
+{
 	auto it = _dsks.find(view_name);
 	if (it == _dsks.end())
 		return NULL;

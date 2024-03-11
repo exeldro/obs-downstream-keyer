@@ -1037,7 +1037,8 @@ void DownstreamKeyer::SetOutputChannel(int oc)
 	obs_source_release(prevTransition);
 }
 
-LockedCheckBox::LockedCheckBox() {
+LockedCheckBox::LockedCheckBox()
+{
 	setProperty("lockCheckBox", true);
 }
 
