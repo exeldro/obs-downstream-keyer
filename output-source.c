@@ -65,6 +65,8 @@ static char *channel_names[] = {"StudioMode.Program",   "Basic.DesktopDevice1",
 static bool view_changed(void *priv, obs_properties_t *props,
 			 obs_property_t *property, obs_data_t *settings)
 {
+	UNUSED_PARAMETER(priv);
+	UNUSED_PARAMETER(property);
 	obs_property_t *channels = obs_properties_get(props, "channel");
 	const char *view_name = obs_data_get_string(settings, "view");
 	bool changed = false;
