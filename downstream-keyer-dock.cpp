@@ -24,6 +24,34 @@ MODULE_EXTERN struct obs_source_info output_source_info;
 std::map<std::string, DownstreamKeyerDock *> _dsks;
 obs_websocket_vendor vendor = nullptr;
 
+extern "C" {
+size_t get_view_count();
+const char *get_view_name(size_t idx);
+obs_view_t *get_view_by_name(const char *view_name);
+};
+
+size_t get_view_count() {
+	return _dsks.size();
+}
+
+const char* get_view_name(size_t idx) {
+	size_t i = 0;
+	for (auto it = _dsks.begin(); it != _dsks.end(); it++) {
+		if (i == idx) {
+			return it->first.c_str();
+		}
+		i++;
+	}
+	return NULL;
+}
+
+obs_view_t* get_view_by_name(const char* view_name) {
+	auto it = _dsks.find(view_name);
+	if (it == _dsks.end())
+		return NULL;
+	return it->second->GetView();
+}
+
 static void proc_add_view(void *data, calldata_t *cd)
 {
 	UNUSED_PARAMETER(data);

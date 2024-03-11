@@ -53,6 +53,8 @@ public:
 			    void *get_transitions_data = nullptr);
 	~DownstreamKeyerDock();
 
+	inline obs_view_t *GetView() { return view; }
+
 	static void get_downstream_keyers(obs_data_t *request_data,
 					  obs_data_t *response_data,
 					  void *param);

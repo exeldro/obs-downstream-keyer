@@ -3,6 +3,7 @@
 struct output_source_context {
 	obs_source_t *source;
 	bool rendering;
+	obs_view_t *view;
 	uint32_t channel;
 	obs_source_t *outputSource;
 	uint32_t width;
@@ -10,6 +11,10 @@ struct output_source_context {
 	struct vec4 color;
 	bool recurring;
 };
+
+size_t get_view_count();
+const char *get_view_name(size_t idx);
+obs_view_t *get_view_by_name(const char* view_name);
 
 static const char *output_source_get_name(void *type_data)
 {
@@ -20,6 +25,17 @@ static const char *output_source_get_name(void *type_data)
 static void output_source_update(void *data, obs_data_t *settings)
 {
 	struct output_source_context *context = data;
+	if (get_view_count() > 1) {
+		const char *view_name = obs_data_get_string(settings, "view");
+		if (strlen(view_name)) {
+			context->view = get_view_by_name(view_name);
+		} else if (context->view) {
+			context->view = NULL;
+		}
+	} else if (context->view) {
+		context->view = NULL;
+	}
+
 	context->channel = (uint32_t)obs_data_get_int(settings, "channel");
 	vec4_from_rgba(&context->color,
 		       (uint32_t)obs_data_get_int(settings, "color"));
@@ -46,6 +62,17 @@ static obs_properties_t *output_source_properties(void *data)
 {
 	UNUSED_PARAMETER(data);
 	obs_properties_t *ppts = obs_properties_create();
+
+	size_t c = get_view_count();
+	if (c > 1) {
+		obs_property_t *p = obs_properties_add_list(
+			ppts, "view", obs_module_text("View"),
+			OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+		for (size_t i = 0; i < c; i++) {
+			const char *name = get_view_name(i);
+			obs_property_list_add_string(p, name, name);
+		}
+	}
 	obs_properties_add_int(ppts, "channel", obs_module_text("Channel"), 0,
 			       MAX_CHANNELS - 1, 1);
 	obs_properties_add_color(ppts, "color",
@@ -112,7 +139,10 @@ static void output_source_video_tick(void *data, float seconds)
 {
 	UNUSED_PARAMETER(seconds);
 	struct output_source_context *context = data;
-	obs_source_t *source = obs_get_output_source(context->channel);
+	obs_source_t *source =
+		context->view
+			? obs_view_get_source(context->view, context->channel)
+				    : obs_get_output_source(context->channel);
 	if (!source) {
 		if (context->outputSource) {
 			context->outputSource = NULL;
