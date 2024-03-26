@@ -1,6 +1,7 @@
 #include <obs-module.h>
 #include <stdio.h>
 #include <obs-frontend-api.h>
+#include <util/dstr.h>
 
 struct output_source_context {
 	obs_source_t *source;
@@ -70,29 +71,45 @@ static bool view_changed(void *priv, obs_properties_t *props,
 	obs_property_t *channels = obs_properties_get(props, "channel");
 	const char *view_name = obs_data_get_string(settings, "view");
 	bool changed = false;
-	char buffer[10];
-	for (int i = 0; i < channel_name_count; i++) {
+	struct dstr buffer = {0};
+
+	obs_view_t *view = get_view_by_name(view_name);
+	
+	for (uint32_t i = 0; i < channel_name_count; i++) {
 		if (strlen(view_name) && i > 0) {
-			snprintf(buffer, 10, "%i", i);
-			if (strcmp(buffer, obs_property_list_item_name(
-						   channels, i)) != 0) {
-				obs_property_list_item_remove(channels, i);
-				obs_property_list_insert_int(channels, i,
-							     buffer, i);
-				changed = true;
-			}
+			dstr_printf(&buffer, "%i", i);
 		} else {
-			const char *name = obs_frontend_get_locale_string(
-				channel_names[i]);
-			if (strcmp(name, obs_property_list_item_name(channels,
-								     i)) != 0) {
-				obs_property_list_item_remove(channels, i);
-				obs_property_list_insert_int(channels, i, name,
-							     i);
-				changed = true;
+			dstr_copy(&buffer, obs_frontend_get_locale_string(
+				channel_names[i]));
+		}
+
+		obs_source_t *source = view ? obs_view_get_source(view, i)
+					    : obs_get_output_source(i);
+		if (source) {
+			if (obs_source_get_type(source) ==
+			    OBS_SOURCE_TYPE_TRANSITION) {
+				obs_source_t *transition = source;
+				source = obs_transition_get_active_source(
+					transition);
+				if (source) {
+					obs_source_release(transition);
+				} else {
+					source = transition;
+				}
 			}
+			dstr_cat(&buffer, " - ");
+			dstr_cat(&buffer, obs_source_get_name(source));
+			obs_source_release(source);
+		}
+		if (strcmp(buffer.array,
+			   obs_property_list_item_name(channels, i)) != 0) {
+			obs_property_list_item_remove(channels, i);
+			obs_property_list_insert_int(channels, i, buffer.array,
+						     i);
+			changed = true;
 		}
 	}
+	dstr_free(&buffer);
 	return changed;
 }
 
