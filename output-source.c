@@ -12,7 +12,6 @@ struct output_source_context {
 	uint32_t width;
 	uint32_t height;
 	struct vec4 color;
-	bool recurring;
 };
 
 size_t get_view_count();
@@ -161,7 +160,7 @@ static void output_source_video_render(void *data, gs_effect_t *effect)
 {
 	UNUSED_PARAMETER(effect);
 	struct output_source_context *context = data;
-	if (context->rendering || context->recurring ||
+	if (context->rendering || 
 	    !context->outputSource) {
 		gs_effect_t *solid = obs_get_base_effect(OBS_EFFECT_SOLID);
 		gs_eparam_t *color =
@@ -197,16 +196,6 @@ static uint32_t output_source_getheight(void *data)
 	return context->height;
 }
 
-static void check_recursion(obs_source_t *parent, obs_source_t *child,
-			    void *data)
-{
-	UNUSED_PARAMETER(parent);
-	struct output_source_context *context = data;
-	if (child == context->source) {
-		context->recurring = true;
-	}
-}
-
 static void output_source_video_tick(void *data, float seconds)
 {
 	UNUSED_PARAMETER(seconds);
@@ -222,12 +211,9 @@ static void output_source_video_tick(void *data, float seconds)
 	if (!source) {
 		if (context->outputSource) {
 			context->outputSource = NULL;
-			context->recurring = false;
 		}
 		return;
 	}
-	context->recurring = false;
-	obs_source_enum_active_tree(source, check_recursion, data);
 	context->outputSource = source;
 	context->width = obs_source_get_width(source);
 	context->height = obs_source_get_height(source);
