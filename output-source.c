@@ -71,15 +71,14 @@ static bool view_changed(void *priv, obs_properties_t *props,
 	const char *view_name = obs_data_get_string(settings, "view");
 	bool changed = false;
 	struct dstr buffer = {0};
-
 	obs_view_t *view = get_view_by_name(view_name);
-	
-	for (uint32_t i = 0; i < channel_name_count; i++) {
-		if (strlen(view_name) && i > 0) {
+
+	for (uint32_t i = 0; i < MAX_CHANNELS; i++) {
+		if (i >= channel_name_count || (strlen(view_name) && i > 0)) {
 			dstr_printf(&buffer, "%i", i);
 		} else {
 			dstr_copy(&buffer, obs_frontend_get_locale_string(
-				channel_names[i]));
+						   channel_names[i]));
 		}
 
 		obs_source_t *source = view ? obs_view_get_source(view, i)
@@ -160,8 +159,7 @@ static void output_source_video_render(void *data, gs_effect_t *effect)
 {
 	UNUSED_PARAMETER(effect);
 	struct output_source_context *context = data;
-	if (context->rendering || 
-	    !context->outputSource) {
+	if (context->rendering || !context->outputSource) {
 		gs_effect_t *solid = obs_get_base_effect(OBS_EFFECT_SOLID);
 		gs_eparam_t *color =
 			gs_effect_get_param_by_name(solid, "color");
