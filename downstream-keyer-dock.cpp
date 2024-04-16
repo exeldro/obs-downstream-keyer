@@ -28,6 +28,7 @@ extern "C" {
 size_t get_view_count();
 const char *get_view_name(size_t idx);
 obs_view_t *get_view_by_name(const char *view_name);
+obs_source_t *get_source_from_view(const char *view_name, uint32_t channel);
 };
 
 size_t get_view_count()
@@ -52,7 +53,21 @@ obs_view_t *get_view_by_name(const char *view_name)
 	auto it = _dsks.find(view_name);
 	if (it == _dsks.end())
 		return NULL;
-	return it->second->GetView();
+	obs_view_t *view = it->second->GetView();
+	return view;
+}
+
+obs_source_t *get_source_from_view(const char *view_name, uint32_t channel)
+{
+	obs_source_t *source = nullptr;
+	auto it = _dsks.find(view_name);
+	if (it != _dsks.end()) {
+		obs_view_t *view = it->second->GetView();
+		if (view) {
+			source = obs_view_get_source(view, channel);
+		}
+	}
+	return source;
 }
 
 static void proc_add_view(void *data, calldata_t *cd)
@@ -62,8 +77,9 @@ static void proc_add_view(void *data, calldata_t *cd)
 	obs_view_t *view = (obs_view_t *)calldata_ptr(cd, "view");
 	if (!viewName || !strlen(viewName))
 		return;
-	if (_dsks.find(viewName) != _dsks.end())
+	if (_dsks.find(viewName) != _dsks.end()) {
 		return;
+	}
 
 	get_transitions_callback_t get_transitions =
 		(get_transitions_callback_t)calldata_ptr(cd, "get_transitions");
@@ -105,8 +121,9 @@ static void proc_remove_view(void *data, calldata_t *cd)
 	const char *viewName = calldata_string(cd, "view_name");
 	if (!viewName || !strlen(viewName))
 		return;
-	if (_dsks.find(viewName) != _dsks.end())
+	if (_dsks.find(viewName) == _dsks.end()) {
 		return;
+	}
 #if LIBOBS_API_VER >= MAKE_SEMANTIC_VERSION(30, 0, 0)
 	std::string name = viewName;
 	name += "DownstreamKeyerDock";
