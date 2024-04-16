@@ -964,6 +964,7 @@ bool DownstreamKeyer::RemoveScene(QString scene_name)
 			scenesList->removeItemWidget(item);
 			obs_hotkey_pair_unregister(
 				item->data(Qt::UserRole).toUInt());
+			delete item;
 			return true;
 		}
 	}
