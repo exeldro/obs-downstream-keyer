@@ -35,6 +35,7 @@ if(BUILD_OUT_OF_TREE)
   find_package(libobs REQUIRED)
   find_package(obs-frontend-api REQUIRED)
   include(cmake/ObsPluginHelpers.cmake)
+  find_qt(COMPONENTS Widgets COMPONENTS_LINUX Gui)
   set(OBS_FRONTEND_API_NAME "obs-frontend-api")
 else()
 	set(OBS_FRONTEND_API_NAME "frontend-api")
@@ -62,8 +63,6 @@ elseif(OS_MACOS)
 	target_compile_options(${PROJECT_NAME} PRIVATE -Wall)
 endif()
 
-# lines if you want add Qt UI in your plugin
-find_qt(COMPONENTS Widgets COMPONENTS_LINUX Gui)
 set_target_properties(${PROJECT_NAME} PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON)
 
 target_link_libraries(${PROJECT_NAME}
