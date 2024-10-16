@@ -80,3 +80,4 @@ public:
 					 void *param);
 	void RefreshDSKPreview();
 };
+#endif
