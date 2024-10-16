@@ -414,6 +414,7 @@ void DownstreamKeyer::Save(obs_data_t *data)
 					   : "");
 	obs_data_set_int(data, "hide_transition_duration",
 			 hideTransitionDuration);
+	obs_data_set_bool(data, "tie", tie->isChecked());
 	obs_data_array_t *sceneArray = obs_data_array_create();
 	for (int i = 0; i < scenesList->count(); i++) {
 		auto item = scenesList->item(i);
@@ -625,6 +626,7 @@ void DownstreamKeyer::Load(obs_data_t *data)
 		      transitionType::hide);
 	hideTransitionDuration =
 		obs_data_get_int(data, "hide_transition_duration");
+	tie->setChecked(obs_data_get_bool(data, "tie"));
 	scenesList->clear();
 	obs_data_array_t *sceneArray = obs_data_get_array(data, "scenes");
 	const auto sceneName = QT_UTF8(obs_data_get_string(data, "scene"));
