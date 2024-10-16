@@ -380,6 +380,7 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 		for (size_t i = 0; i < count; i++) {
 			auto keyerData = obs_data_array_item(keyers, i);
 			auto keyer = new DownstreamKeyer(
+				this,
 				(int)(outputChannel + i),
 				QT_UTF8(obs_data_get_string(keyerData, "name")),
 				view, get_transitions, get_transitions_data);
@@ -412,6 +413,7 @@ void DownstreamKeyerDock::AddDefaultKeyer()
 			outputChannel = 7;
 	}
 	auto keyer = new DownstreamKeyer(
+		this,
 		outputChannel, QT_UTF8(obs_module_text("DefaultName")), view,
 		get_transitions, get_transitions_data);
 	tabs->addTab(keyer, keyer->objectName());
@@ -573,7 +575,8 @@ void DownstreamKeyerDock::Add()
 	if (NameDialog::AskForName(this, name)) {
 		if (outputChannel < 7 || outputChannel >= MAX_CHANNELS)
 			outputChannel = 7;
-		auto keyer = new DownstreamKeyer(outputChannel + tabs->count(),
+		auto keyer = new DownstreamKeyer(this,
+						 outputChannel + tabs->count(),
 						 QT_UTF8(name.c_str()), view,
 						 get_transitions,
 						 get_transitions_data);
@@ -701,6 +704,36 @@ bool DownstreamKeyerDock::RemoveExcludeScene(QString dskName,
 		}
 	}
 	return false;
+}
+
+void DownstreamKeyerDock::RefreshDSKPreview()
+{
+
+	obs_source_t *preview_scene_as_source = obs_get_source_by_name("DownstreamKeyer Preview");
+
+	if (!preview_scene_as_source)
+		return;
+
+	obs_scene_t *scene = obs_scene_from_source(preview_scene_as_source);
+	obs_scene_enum_items(
+		scene, remove_item,
+		nullptr);
+
+	const int count = tabs->count();
+	for (int i = 0; i < count; i++) {
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
+		QListWidget *sl = w->getScenesListWidget();
+		const auto l = sl->selectedItems();
+		const auto newSource =
+			l.count()
+			? obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text()))
+			: nullptr;
+		if (newSource) {
+			obs_scene_add(scene, newSource);
+			obs_source_release(newSource);
+		}
+	}
+	obs_source_release(preview_scene_as_source);
 }
 
 void DownstreamKeyerDock::get_downstream_keyers(obs_data_t *request_data,
