@@ -1,4 +1,7 @@
 #pragma once
+#ifndef	DOWNSTREAMKEYERDOCK_H
+#define DOWNSTREAMKEYERDOCK_H
+
 #include <QDockWidget>
 #include <qmenu.h>
 #include <QTabWidget>
@@ -75,4 +78,5 @@ public:
 	static void remove_exclude_scene(obs_data_t *request_data,
 					 obs_data_t *response_data,
 					 void *param);
+	void RefreshDSKPreview();
 };
