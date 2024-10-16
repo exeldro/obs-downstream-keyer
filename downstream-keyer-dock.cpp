@@ -301,6 +301,7 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v,
 
 	auto config = new QPushButton(this);
 	config->setProperty("themeID", "configIconSmall");
+	config->setProperty("class", "icon-gear");
 
 	connect(config, &QAbstractButton::clicked, this,
 		&DownstreamKeyerDock::ConfigClicked);
