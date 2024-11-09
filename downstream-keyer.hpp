@@ -1,16 +1,17 @@
 #pragma once
 
 #include <QCheckBox>
-#include <qcombobox.h>
-#include <qlabel.h>
-#include <qlistwidget.h>
-#include <qspinbox.h>
-#include <qtoolbar.h>
+#include <QComboBox>
+#include <QLabel>
+#include <QListWidget>
+#include <QSpinBox>
+#include <QTimer>
+#include <QToolBar>
 #include <QWidget>
 #include <set>
 
-#include "obs-websocket-api.h"
 #include "obs.h"
+#include "obs-websocket-api.h"
 
 typedef void (*get_transitions_callback_t)(void *data, struct obs_frontend_source_list *sources);
 
@@ -28,6 +29,7 @@ class DownstreamKeyer : public QWidget {
 	Q_OBJECT
 
 private:
+	QTimer hideTimer;
 	int outputChannel;
 	obs_source_t *transition;
 	obs_source_t *showTransition;
@@ -39,6 +41,7 @@ private:
 	uint32_t showTransitionDuration;
 	uint32_t hideTransitionDuration;
 	uint32_t overrideTransitionDuration;
+	uint32_t hideAfter;
 	LockedCheckBox *tie;
 	obs_hotkey_id null_hotkey_id;
 	obs_hotkey_pair_id tie_hotkey_id;
@@ -81,6 +84,8 @@ public:
 	std::string GetTransition(enum transitionType transition_type = match);
 	void SetTransitionDuration(int duration, enum transitionType transition_type = match);
 	int GetTransitionDuration(enum transitionType transition_type = match);
+	void SetHideAfter(int duration);
+	int GetHideAfter();
 	void SceneChanged(std::string scene);
 	void AddExcludeScene(const char *scene_name);
 	void RemoveExcludeScene(const char *scene_name);

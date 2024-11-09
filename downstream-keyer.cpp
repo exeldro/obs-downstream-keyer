@@ -145,6 +145,11 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, get_t
 	tie_hotkey_id = obs_hotkey_pair_register_frontend(QT_TO_UTF8(enableTieHotkeyName), QT_TO_UTF8(enableTieHotkeyName),
 							  QT_TO_UTF8(disableTieHotkeyName), QT_TO_UTF8(disableTieHotkeyName),
 							  enable_tie_hotkey, disable_tie_hotkey, this, this);
+
+	connect(&hideTimer, &QTimer::timeout, [this]() {
+		hideTimer.stop();
+		on_actionSceneNull_triggered();
+	});
 }
 
 DownstreamKeyer::~DownstreamKeyer()
@@ -252,6 +257,11 @@ void DownstreamKeyer::on_actionSceneNull_triggered()
 
 void DownstreamKeyer::apply_source(obs_source_t *const newSource)
 {
+	if (newSource && hideAfter > 0) {
+		hideTimer.stop();
+		hideTimer.setInterval(hideAfter * 1000);
+		hideTimer.start();
+	}
 	obs_source_t *prevSource = view ? obs_view_get_source(view, outputChannel) : obs_get_output_source(outputChannel);
 	obs_source_t *prevTransition = nullptr;
 	if (prevSource && obs_source_get_type(prevSource) == OBS_SOURCE_TYPE_TRANSITION) {
@@ -366,6 +376,7 @@ void DownstreamKeyer::Save(obs_data_t *data)
 	obs_data_set_int(data, "show_transition_duration", showTransitionDuration);
 	obs_data_set_string(data, "hide_transition", hideTransition ? obs_source_get_name(hideTransition) : "");
 	obs_data_set_int(data, "hide_transition_duration", hideTransitionDuration);
+	obs_data_set_int(data, "hide_after", hideAfter);
 	obs_data_set_bool(data, "tie", tie->isChecked());
 	obs_data_array_t *sceneArray = obs_data_array_create();
 	for (int i = 0; i < scenesList->count(); i++) {
@@ -511,6 +522,18 @@ int DownstreamKeyer::GetTransitionDuration(enum transitionType transition_type)
 	return transitionDuration;
 }
 
+void DownstreamKeyer::SetHideAfter(int duration)
+{
+	hideAfter = duration;
+	if (duration == 0)
+		hideTimer.stop();
+}
+
+int DownstreamKeyer::GetHideAfter()
+{
+	return hideAfter;
+}
+
 void DownstreamKeyer::SceneChanged(std::string scene)
 {
 	auto found = false;
@@ -550,6 +573,7 @@ void DownstreamKeyer::Load(obs_data_t *data)
 	showTransitionDuration = obs_data_get_int(data, "show_transition_duration");
 	SetTransition(obs_data_get_string(data, "hide_transition"), transitionType::hide);
 	hideTransitionDuration = obs_data_get_int(data, "hide_transition_duration");
+	hideAfter = obs_data_get_int(data, "hide_after");
 	tie->setChecked(obs_data_get_bool(data, "tie"));
 	scenesList->clear();
 	obs_data_array_t *sceneArray = obs_data_get_array(data, "scenes");

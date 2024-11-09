@@ -513,6 +513,25 @@ void DownstreamKeyerDock::ConfigClicked()
 	AddTransitionMenu(tm, transitionType::hide);
 	tm = popup.addMenu(QT_UTF8(obs_module_text("ExcludeScene")));
 	AddExcludeSceneMenu(tm);
+
+	tm = popup.addMenu(QT_UTF8(obs_module_text("HideAfter")));
+	QSpinBox *duration = new QSpinBox(tm);
+	duration->setMinimum(0);
+	duration->setSuffix("s");
+	duration->setMaximum(1000);
+	duration->setSingleStep(1);
+	const auto w = dynamic_cast<DownstreamKeyer *>(tabs->currentWidget());
+	duration->setValue(w->GetHideAfter());
+	auto setDuration = [&](int duration) {
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->currentWidget());
+		if (w)
+			w->SetHideAfter(duration);
+	};
+	connect(duration, (void(QSpinBox::*)(int)) & QSpinBox::valueChanged, setDuration);
+	QWidgetAction *durationAction = new QWidgetAction(tm);
+	durationAction->setDefaultWidget(duration);
+
+	tm->addAction(durationAction);
 	popup.exec(QCursor::pos());
 }
 
