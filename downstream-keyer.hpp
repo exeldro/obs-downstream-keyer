@@ -12,8 +12,7 @@
 #include "obs-websocket-api.h"
 #include "obs.h"
 
-typedef void (*get_transitions_callback_t)(
-	void *data, struct obs_frontend_source_list *sources);
+typedef void (*get_transitions_callback_t)(void *data, struct obs_frontend_source_list *sources);
 
 class LockedCheckBox : public QCheckBox {
 	Q_OBJECT
@@ -50,18 +49,13 @@ private:
 
 	static void source_rename(void *data, calldata_t *calldata);
 	static void source_remove(void *data, calldata_t *calldata);
-	static bool enable_DSK_hotkey(void *data, obs_hotkey_pair_id id,
-				      obs_hotkey_t *hotkey, bool pressed);
-	static bool disable_DSK_hotkey(void *data, obs_hotkey_pair_id id,
-				       obs_hotkey_t *hotkey, bool pressed);
+	static bool enable_DSK_hotkey(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed);
+	static bool disable_DSK_hotkey(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed);
 
-	static void null_hotkey(void *data, obs_hotkey_id id,
-				obs_hotkey_t *hotkey, bool pressed);
+	static void null_hotkey(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed);
 
-	static bool enable_tie_hotkey(void *data, obs_hotkey_pair_id id,
-				      obs_hotkey_t *hotkey, bool pressed);
-	static bool disable_tie_hotkey(void *data, obs_hotkey_pair_id id,
-				       obs_hotkey_t *hotkey, bool pressed);
+	static bool enable_tie_hotkey(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed);
+	static bool disable_tie_hotkey(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed);
 
 	void ChangeSceneIndex(bool relative, int idx, int invalidIdx);
 
@@ -77,18 +71,15 @@ private slots:
 signals:
 
 public:
-	DownstreamKeyer(int channel, QString name, obs_view_t *view = nullptr,
-			get_transitions_callback_t get_transitions = nullptr,
+	DownstreamKeyer(int channel, QString name, obs_view_t *view = nullptr, get_transitions_callback_t get_transitions = nullptr,
 			void *get_transitions_data = nullptr);
 	~DownstreamKeyer();
 
 	void Save(obs_data_t *data);
 	void Load(obs_data_t *data);
-	void SetTransition(const char *transition_name,
-			   enum transitionType transition_type = match);
+	void SetTransition(const char *transition_name, enum transitionType transition_type = match);
 	std::string GetTransition(enum transitionType transition_type = match);
-	void SetTransitionDuration(int duration,
-				   enum transitionType transition_type = match);
+	void SetTransitionDuration(int duration, enum transitionType transition_type = match);
 	int GetTransitionDuration(enum transitionType transition_type = match);
 	void SceneChanged(std::string scene);
 	void AddExcludeScene(const char *scene_name);
