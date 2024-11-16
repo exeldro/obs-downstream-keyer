@@ -517,9 +517,9 @@ void DownstreamKeyerDock::ConfigClicked()
 	tm = popup.addMenu(QT_UTF8(obs_module_text("HideAfter")));
 	QSpinBox *duration = new QSpinBox(tm);
 	duration->setMinimum(0);
-	duration->setSuffix("s");
-	duration->setMaximum(1000);
-	duration->setSingleStep(1);
+	duration->setSuffix("ms");
+	duration->setMaximum(1000000);
+	duration->setSingleStep(1000);
 	const auto w = dynamic_cast<DownstreamKeyer *>(tabs->currentWidget());
 	duration->setValue(w->GetHideAfter());
 	auto setDuration = [&](int duration) {

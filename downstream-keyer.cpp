@@ -259,7 +259,7 @@ void DownstreamKeyer::apply_source(obs_source_t *const newSource)
 {
 	if (newSource && hideAfter > 0) {
 		hideTimer.stop();
-		hideTimer.setInterval(hideAfter * 1000);
+		hideTimer.setInterval(hideAfter);
 		hideTimer.start();
 	}
 	obs_source_t *prevSource = view ? obs_view_get_source(view, outputChannel) : obs_get_output_source(outputChannel);
