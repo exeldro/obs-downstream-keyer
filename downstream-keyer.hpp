@@ -1,6 +1,4 @@
 #pragma once
-#ifndef DOWNSTREAMKEYER_H
-#define DOWNSTREAMKEYER_H
 
 #include <QCheckBox>
 #include <qcombobox.h>
@@ -10,11 +8,9 @@
 #include <qtoolbar.h>
 #include <QWidget>
 #include <set>
-#include "name-dialog.hpp"
+
 #include "obs-websocket-api.h"
 #include "obs.h"
-
-class DownstreamKeyerDock; // Forward declaration of ParentClass
 
 typedef void (*get_transitions_callback_t)(
 	void *data, struct obs_frontend_source_list *sources);
@@ -33,7 +29,6 @@ class DownstreamKeyer : public QWidget {
 	Q_OBJECT
 
 private:
-	DownstreamKeyerDock *parent;
 	int outputChannel;
 	obs_source_t *transition;
 	obs_source_t *showTransition;
@@ -72,7 +67,6 @@ private:
 
 private slots:
 	void on_actionAddScene_triggered();
-	void on_actionAddSpacerScene_triggered();
 	void on_actionRemoveScene_triggered();
 	void on_actionSceneUp_triggered();
 	void on_actionSceneDown_triggered();
@@ -83,7 +77,7 @@ private slots:
 signals:
 
 public:
-	DownstreamKeyer(DownstreamKeyerDock *parent, int channel, QString name, obs_view_t *view = nullptr,
+	DownstreamKeyer(int channel, QString name, obs_view_t *view = nullptr,
 			get_transitions_callback_t get_transitions = nullptr,
 			void *get_transitions_data = nullptr);
 	~DownstreamKeyer();
@@ -103,12 +97,7 @@ public:
 	bool SwitchToScene(QString scene_name);
 	void add_scene(QString scene_name, obs_source_t *s, int insertBeforeRow);
 	bool AddScene(QString scene_name, int insertBeforeRow);
-	void add_spacer_scene(QString spacer_name);
-	bool AddSpacerScene(QString spacer_name);	
 	bool RemoveScene(QString scene_name);
 	void SetTie(bool tie);
 	void SetOutputChannel(int outputChannel);
-	QListWidget *getScenesListWidget(); 
 };
-
-#endif
