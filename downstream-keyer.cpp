@@ -220,7 +220,8 @@ void DownstreamKeyer::on_actionAddScene_triggered()
 		return;
 	auto sceneName = QT_UTF8(obs_source_get_name(scene));
 	if (scenesList->findItems(sceneName, Qt::MatchFixedString).count() == 0) {
-		add_scene(sceneName, scene);
+		const auto currentRow = scenesList->currentRow();
+		add_scene(sceneName, scene, currentRow);
 	}
 
 	obs_source_release(scene);
@@ -834,10 +835,14 @@ bool DownstreamKeyer::SwitchToScene(QString scene_name)
 	return false;
 }
 
-void DownstreamKeyer::add_scene(QString scene_name, obs_source_t *s)
+void DownstreamKeyer::add_scene(QString scene_name, obs_source_t *s, int insertBeforeRow)
 {
 	const auto item = new QListWidgetItem(scene_name);
-	scenesList->addItem(item);
+	int scenesListCount = scenesList->count();
+	if ((insertBeforeRow > scenesListCount) || (insertBeforeRow < 0)) {
+		insertBeforeRow = scenesListCount;
+	}
+	scenesList->insertItem(insertBeforeRow, item);
 
 	std::string enable_hotkey = obs_module_text("EnableDSK");
 	enable_hotkey += " ";
@@ -853,7 +858,7 @@ void DownstreamKeyer::add_scene(QString scene_name, obs_source_t *s)
 	}
 }
 
-bool DownstreamKeyer::AddScene(QString scene_name)
+bool DownstreamKeyer::AddScene(QString scene_name, int insertBeforeRow)
 {
 	if (scene_name.isEmpty()) {
 		return false;
@@ -865,8 +870,7 @@ bool DownstreamKeyer::AddScene(QString scene_name)
 	auto name = nameUtf8.constData();
 	auto s = obs_get_source_by_name(name);
 	if (obs_source_is_scene(s)) {
-
-		add_scene(scene_name, s);
+		add_scene(scene_name, s, insertBeforeRow);
 		obs_source_release(s);
 		return true;
 	}
