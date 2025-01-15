@@ -23,6 +23,7 @@ private:
 
 	void Save(obs_data_t *data);
 	void Load(obs_data_t *data);
+	QString GetScene(QString dskName);
 	bool SwitchDSK(QString dskName, QString sceneName);
 	bool AddScene(QString dskName, QString sceneName, int insertBeforeRow);
 	bool RemoveScene(QString dskName, QString sceneName);
@@ -54,6 +55,7 @@ public:
 	static void get_downstream_keyer(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void add_downstream_keyer(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void remove_downstream_keyer(obs_data_t *request_data, obs_data_t *response_data, void *param);
+	static void get_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void change_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void add_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void remove_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);

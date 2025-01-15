@@ -815,6 +815,19 @@ bool DownstreamKeyer::IsSceneExcluded(const char *scene_name)
 	return exclude_scenes.find(scene_name) != exclude_scenes.end();
 }
 
+QString DownstreamKeyer::GetScene()
+{
+	for (int i = 0; i < scenesList->count(); i++) {
+		const auto item = scenesList->item(i);
+		if (!item)
+			continue;
+		if (!item->isSelected())
+			continue;
+		return item->text();
+	}
+	return "";
+}
+
 bool DownstreamKeyer::SwitchToScene(QString scene_name)
 {
 	if (scene_name.isEmpty()) {

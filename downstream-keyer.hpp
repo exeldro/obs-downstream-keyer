@@ -90,6 +90,7 @@ public:
 	void AddExcludeScene(const char *scene_name);
 	void RemoveExcludeScene(const char *scene_name);
 	bool IsSceneExcluded(const char *scene_name);
+	QString GetScene();
 	bool SwitchToScene(QString scene_name);
 	void add_scene(QString scene_name, obs_source_t *s, int insertBeforeRow);
 	bool AddScene(QString scene_name, int insertBeforeRow);
