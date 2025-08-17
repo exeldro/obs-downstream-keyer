@@ -6,7 +6,7 @@ else()
   cmake_minimum_required(VERSION 3.18)
 endif()
 
-project(downstream-keyer VERSION 0.3.3)
+project(downstream-keyer VERSION 0.4.0)
 set(PROJECT_FULL_NAME "Downstream keyer")
 
 # Set new UUIDs when you start to create a new plugin.
