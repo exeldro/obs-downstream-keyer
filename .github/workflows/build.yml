@@ -23,7 +23,7 @@ jobs:
     env:
       CODESIGN_IDENT: '-'
       CODESIGN_IDENT_INSTALLER: ''
-      MACOSX_DEPLOYMENT_TARGET: '10.15'  
+      MACOSX_DEPLOYMENT_TARGET: '10.15'
     defaults:
       run:
         shell: zsh {0}
@@ -74,17 +74,7 @@ jobs:
           }
           print '::endgroup::'
 
-          print "ccacheDate=$(date +"%Y-%m-%d")" >> $GITHUB_OUTPUT
           print "commitHash=${"$(git rev-parse HEAD)"[0,9]}" >> $GITHUB_OUTPUT
-
-      - name: Restore Compilation Cache
-        id: ccache-cache
-        uses: actions/cache@v4.0.0
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: macos-${{ matrix.arch }}-ccache-plugin-${{ steps.setup.outputs.ccacheDate }}
-          restore-keys: |
-            macos-${{ matrix.arch }}-ccache-plugin-
 
       - name: Check for GitHub Labels
         id: seekingTesters
@@ -143,7 +133,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ubuntu: ['ubuntu-20.04', 'ubuntu-22.04']
+        ubuntu: ['ubuntu-22.04']
     steps:
       - name: Checkout
         uses: actions/checkout@v4.1.1
@@ -313,6 +303,6 @@ jobs:
           name: '${{ env.FILE_NAME }}-installer'
           path: package/*.exe
       - name: Remove temp artifacts
-        uses: geekyeggo/delete-artifact@v4.1.0
+        uses: geekyeggo/delete-artifact@v5.1.0
         with:
           name: "${{ env.FILE_NAME_X86 }}\n${{ env.FILE_NAME_X64 }}"

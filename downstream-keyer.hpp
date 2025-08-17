@@ -13,6 +13,22 @@
 #include "obs.h"
 #include "obs-websocket-api.h"
 
+#if LIBOBS_API_VER < MAKE_SEMANTIC_VERSION(31, 1, 0)
+extern "C" {
+struct obs_canvas;
+typedef struct obs_canvas obs_canvas_t;
+#define OBS_FRONTEND_EVENT_CANVAS_ADDED 41
+#define OBS_FRONTEND_EVENT_CANVAS_REMOVED 42
+extern obs_source_t *(*obs_canvas_get_channel)(obs_canvas_t *canvas, uint32_t channel);
+extern void (*obs_canvas_set_channel)(obs_canvas_t *canvas, uint32_t channel, obs_source_t *source);
+extern obs_source_t *(*obs_canvas_get_source_by_name)(obs_canvas_t *canvas, const char *name);
+extern obs_canvas_t *(*obs_get_main_canvas)(void);
+extern void (*obs_canvas_release)(obs_canvas_t *canvas);
+extern void (*obs_enum_canvases)(bool (*enum_proc)(void *, obs_canvas_t *), void *param);
+extern const char *(*obs_canvas_get_name)(obs_canvas_t *canvas);
+}
+#endif
+
 typedef void (*get_transitions_callback_t)(void *data, struct obs_frontend_source_list *sources);
 
 class LockedCheckBox : public QCheckBox {
@@ -47,6 +63,7 @@ private:
 	obs_hotkey_pair_id tie_hotkey_id;
 	std::set<std::string> exclude_scenes;
 	obs_view_t *view = nullptr;
+	obs_canvas_t *canvas = nullptr;
 	get_transitions_callback_t get_transitions = nullptr;
 	void *get_transitions_data = nullptr;
 
@@ -74,8 +91,8 @@ private slots:
 signals:
 
 public:
-	DownstreamKeyer(int channel, QString name, obs_view_t *view = nullptr, get_transitions_callback_t get_transitions = nullptr,
-			void *get_transitions_data = nullptr);
+	DownstreamKeyer(int channel, QString name, obs_view_t *view = nullptr, obs_canvas_t *canvas = nullptr,
+			get_transitions_callback_t get_transitions = nullptr, void *get_transitions_data = nullptr);
 	~DownstreamKeyer();
 
 	void Save(obs_data_t *data);

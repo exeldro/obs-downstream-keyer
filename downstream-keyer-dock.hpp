@@ -12,14 +12,13 @@ class DownstreamKeyerDock : public QWidget {
 private:
 	QTabWidget *tabs;
 	int outputChannel;
-	bool loaded;
+	bool loaded = false;
+	bool closing = false;
 	obs_view_t *view = nullptr;
+	obs_canvas_t *canvas = nullptr;
 	std::string viewName;
 	get_transitions_callback_t get_transitions = nullptr;
 	void *get_transitions_data = nullptr;
-
-	static void frontend_event(enum obs_frontend_event event, void *data);
-	static void frontend_save_load(obs_data_t *save_data, bool saving, void *data);
 
 	void Save(obs_data_t *data);
 	void Load(obs_data_t *data);
@@ -45,11 +44,16 @@ private slots:
 
 public:
 	DownstreamKeyerDock(QWidget *parent = nullptr, int outputChannel = 7, obs_view_t *view = nullptr,
-			    const char *view_name = nullptr, get_transitions_callback_t get_transitions = nullptr,
-			    void *get_transitions_data = nullptr);
+			    obs_canvas_t *canvas = nullptr, const char *view_name = nullptr);
 	~DownstreamKeyerDock();
 
+	void SetTransitions(get_transitions_callback_t get_transitions = nullptr, void *get_transitions_data = nullptr);
+
 	inline obs_view_t *GetView() { return view; }
+	inline obs_canvas_t *GetCanvas() { return canvas; }
+
+	static void frontend_event(enum obs_frontend_event event, void *data);
+	static void frontend_save_load(obs_data_t *save_data, bool saving, void *data);
 
 	static void get_downstream_keyers(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void get_downstream_keyer(obs_data_t *request_data, obs_data_t *response_data, void *param);

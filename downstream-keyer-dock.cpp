@@ -1,16 +1,20 @@
+#include "downstream-keyer.hpp"
 #include "downstream-keyer-dock.hpp"
+#include "name-dialog.hpp"
+#include "obs.hpp"
+#include "obs-websocket-api.h"
+#include "version.h"
 #include <obs-module.h>
 #include <QMainWindow>
 #include <QMenu>
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QWidgetAction>
+#include <util/platform.h>
 
-#include "downstream-keyer.hpp"
-#include "name-dialog.hpp"
-#include "obs-websocket-api.h"
-#include "obs.hpp"
-#include "version.h"
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
 
 #define QT_UTF8(str) QString::fromUtf8(str)
 #define QT_TO_UTF8(str) str.toUtf8().constData()
@@ -70,23 +74,13 @@ obs_source_t *get_source_from_view(const char *view_name, uint32_t channel)
 	return source;
 }
 
-static void proc_add_view(void *data, calldata_t *cd)
+obs_data_t *load_data = nullptr;
+
+static DownstreamKeyerDock *add_dock(const char *viewName, obs_view_t *view, obs_canvas_t *canvas)
 {
-	UNUSED_PARAMETER(data);
-	const char *viewName = calldata_string(cd, "view_name");
-	obs_view_t *view = (obs_view_t *)calldata_ptr(cd, "view");
-	if (!viewName || !strlen(viewName))
-		return;
-	if (_dsks.find(viewName) != _dsks.end()) {
-		return;
-	}
-
-	get_transitions_callback_t get_transitions = (get_transitions_callback_t)calldata_ptr(cd, "get_transitions");
-	void *get_transitions_data = calldata_ptr(cd, "get_transitions_data");
-
 	const auto main_window = static_cast<QMainWindow *>(obs_frontend_get_main_window());
 	obs_frontend_push_ui_translation(obs_module_get_string);
-	auto dsk = new DownstreamKeyerDock(main_window, 1, view, viewName, get_transitions, get_transitions_data);
+	auto dsk = new DownstreamKeyerDock(main_window, 1, view, canvas, viewName);
 	QString title = QString::fromUtf8(viewName);
 	title += " ";
 	title += QT_UTF8(obs_module_text("DownstreamKeyer"));
@@ -108,6 +102,53 @@ static void proc_add_view(void *data, calldata_t *cd)
 #endif
 	_dsks[viewName] = dsk;
 	obs_frontend_pop_ui_translation();
+	if (load_data)
+		DownstreamKeyerDock::frontend_save_load(load_data, false, dsk);
+	return dsk;
+}
+
+static void proc_add_view(void *data, calldata_t *cd)
+{
+	UNUSED_PARAMETER(data);
+	const char *viewName = calldata_string(cd, "view_name");
+	obs_view_t *view = (obs_view_t *)calldata_ptr(cd, "view");
+	if (!viewName || !strlen(viewName))
+		return;
+	auto dski = _dsks.find(viewName);
+	if (dski != _dsks.end()) {
+		auto transitions = (get_transitions_callback_t)calldata_ptr(cd, "get_transitions");
+		if (transitions) {
+			dski->second->SetTransitions((get_transitions_callback_t)calldata_ptr(cd, "get_transitions"),
+						     calldata_ptr(cd, "get_transitions_data"));
+		}
+		return;
+	}
+
+	auto dsk = add_dock(viewName, view, nullptr);
+	dsk->SetTransitions((get_transitions_callback_t)calldata_ptr(cd, "get_transitions"),
+			    calldata_ptr(cd, "get_transitions_data"));
+}
+
+static void proc_add_canvas(void *data, calldata_t *cd)
+{
+	UNUSED_PARAMETER(data);
+	const char *viewName = calldata_string(cd, "canvas_name");
+	obs_canvas_t *canvas = (obs_canvas_t *)calldata_ptr(cd, "canvas");
+	if (!viewName || !strlen(viewName))
+		return;
+	auto dski = _dsks.find(viewName);
+	if (dski != _dsks.end()) {
+		auto transitions = (get_transitions_callback_t)calldata_ptr(cd, "get_transitions");
+		if (transitions) {
+			dski->second->SetTransitions((get_transitions_callback_t)calldata_ptr(cd, "get_transitions"),
+						     calldata_ptr(cd, "get_transitions_data"));
+		}
+		return;
+	}
+
+	auto dsk = add_dock(viewName, nullptr, canvas);
+	dsk->SetTransitions((get_transitions_callback_t)calldata_ptr(cd, "get_transitions"),
+			    calldata_ptr(cd, "get_transitions_data"));
 }
 
 static void proc_remove_view(void *data, calldata_t *cd)
@@ -129,10 +170,97 @@ static void proc_remove_view(void *data, calldata_t *cd)
 	_dsks.erase(viewName);
 }
 
+static void proc_remove_canvas(void *data, calldata_t *cd)
+{
+	UNUSED_PARAMETER(data);
+	const char *viewName = calldata_string(cd, "canvas_name");
+	if (!viewName || !strlen(viewName))
+		return;
+	if (_dsks.find(viewName) == _dsks.end()) {
+		return;
+	}
+#if LIBOBS_API_VER >= MAKE_SEMANTIC_VERSION(30, 0, 0)
+	std::string name = viewName;
+	name += "DownstreamKeyerDock";
+	obs_frontend_remove_dock(name.c_str());
+#else
+	delete _dsks[viewName];
+#endif
+	_dsks.erase(viewName);
+}
+
+static void refresh_canvas()
+{
+#if LIBOBS_API_VER < MAKE_SEMANTIC_VERSION(31, 1, 0)
+	if (!obs_enum_canvases)
+		return;
+#endif
+	obs_canvas_t *main_canvas = obs_get_main_canvas();
+	obs_enum_canvases(
+		[](void *param, obs_canvas_t *canvas) {
+			if (canvas == param)
+				return true;
+			UNUSED_PARAMETER(param);
+			const char *canvas_name = obs_canvas_get_name(canvas);
+			if (!canvas_name || !strlen(canvas_name))
+				return true;
+			if (_dsks.find(canvas_name) != _dsks.end())
+				return true;
+			add_dock(canvas_name, nullptr, canvas);
+			return true;
+		},
+		main_canvas);
+	obs_canvas_release(main_canvas);
+}
+
+static void frontend_event(enum obs_frontend_event event, void *data)
+{
+	UNUSED_PARAMETER(data);
+	if (event == OBS_FRONTEND_EVENT_CANVAS_ADDED) {
+		refresh_canvas();
+	} else if (event == OBS_FRONTEND_EVENT_CANVAS_REMOVED) {
+	} else if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP) {
+		load_data = nullptr;
+	}
+}
+
+static void frontend_save_load(obs_data_t *save_data, bool saving, void *data)
+{
+	UNUSED_PARAMETER(data);
+	load_data = save_data;
+	if (!saving)
+		refresh_canvas();
+}
+
 bool obs_module_load()
 {
 	blog(LOG_INFO, "[Downstream Keyer] loaded version %s", PROJECT_VERSION);
 	obs_register_source(&output_source_info);
+
+#if LIBOBS_API_VER < MAKE_SEMANTIC_VERSION(31, 1, 0)
+	if (obs_get_version() >= MAKE_SEMANTIC_VERSION(31, 1, 0)) {
+#ifdef _WIN32
+		void *dl = os_dlopen("obs");
+#else
+		void *dl = dlopen(nullptr, RTLD_LAZY);
+#endif
+		if (dl) {
+			obs_canvas_get_channel = (obs_source_t * (*)(obs_canvas_t * canvas, uint32_t channel))
+				os_dlsym(dl, "obs_canvas_get_channel");
+			obs_canvas_set_channel = (void (*)(obs_canvas_t *canvas, uint32_t channel,
+							   obs_source_t *source))os_dlsym(dl, "obs_canvas_set_channel");
+			obs_canvas_get_source_by_name = (obs_source_t * (*)(obs_canvas_t * canvas, const char *name))
+				os_dlsym(dl, "obs_canvas_get_source_by_name");
+			obs_get_main_canvas = (obs_canvas_t * (*)(void)) os_dlsym(dl, "obs_get_main_canvas");
+			obs_canvas_release = (void (*)(obs_canvas_t *canvas))os_dlsym(dl, "obs_canvas_release");
+			obs_enum_canvases =
+				(void (*)(bool (*enum_proc)(void *, obs_canvas_t *), void *param))os_dlsym(dl, "obs_enum_canvases");
+			obs_canvas_get_name = (const char *(*)(obs_canvas_t *canvas))os_dlsym(dl, "obs_canvas_get_name");
+			os_dlclose(dl);
+		}
+	}
+#endif
+
 	const auto main_window = static_cast<QMainWindow *>(obs_frontend_get_main_window());
 	obs_frontend_push_ui_translation(obs_module_get_string);
 
@@ -156,6 +284,11 @@ bool obs_module_load()
 	auto ph = obs_get_proc_handler();
 	proc_handler_add(ph, "void downstream_keyer_add_view(in ptr view, in string view_name)", &proc_add_view, nullptr);
 	proc_handler_add(ph, "void downstream_keyer_remove_view(in string view_name)", &proc_remove_view, nullptr);
+	proc_handler_add(ph, "void downstream_keyer_add_canvas(in ptr canvas, in string canvas_name)", &proc_add_canvas, nullptr);
+	proc_handler_add(ph, "void downstream_keyer_remove_canvas(in string canvas_name)", &proc_remove_canvas, nullptr);
+
+	obs_frontend_add_event_callback(frontend_event, nullptr);
+	obs_frontend_add_save_callback(frontend_save_load, nullptr);
 	return true;
 }
 
@@ -182,6 +315,8 @@ void obs_module_post_load(void)
 
 void obs_module_unload()
 {
+	obs_frontend_remove_event_callback(frontend_event, nullptr);
+	obs_frontend_remove_save_callback(frontend_save_load, nullptr);
 	_dsks.clear();
 #if LIBOBS_API_VER >= MAKE_SEMANTIC_VERSION(30, 0, 0)
 	obs_frontend_remove_dock("DownstreamKeyerDock");
@@ -227,30 +362,29 @@ void DownstreamKeyerDock::frontend_event(enum obs_frontend_event event, void *da
 	auto downstreamKeyerDock = static_cast<DownstreamKeyerDock *>(data);
 	if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP && downstreamKeyerDock->loaded) {
 		downstreamKeyerDock->ClearKeyers();
-		downstreamKeyerDock->AddDefaultKeyer();
+		if (!downstreamKeyerDock->closing)
+			downstreamKeyerDock->AddDefaultKeyer();
 	} else if (event == OBS_FRONTEND_EVENT_EXIT) {
 		downstreamKeyerDock->ClearKeyers();
 	} else if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED) {
 		downstreamKeyerDock->SceneChanged();
+	} else if (event == OBS_FRONTEND_EVENT_SCRIPTING_SHUTDOWN) {
+		downstreamKeyerDock->closing = true;
+		downstreamKeyerDock->ClearKeyers();
 	}
 }
 
-DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v, const char *vn, get_transitions_callback_t gt,
-					 void *gtd)
+DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v, obs_canvas_t *c, const char *vn)
 	: QWidget(parent),
 	  outputChannel(oc),
 	  loaded(false),
-	  view(v)
+	  view(v),
+	  canvas(c)
 {
-	if (gt) {
-		get_transitions = gt;
-		get_transitions_data = gtd;
-	} else {
-		get_transitions = [](void *data, struct obs_frontend_source_list *sources) {
-			UNUSED_PARAMETER(data);
-			obs_frontend_get_transitions(sources);
-		};
-	}
+	get_transitions = [](void *data, struct obs_frontend_source_list *sources) {
+		UNUSED_PARAMETER(data);
+		obs_frontend_get_transitions(sources);
+	};
 
 	if (vn)
 		viewName = vn;
@@ -290,6 +424,12 @@ DownstreamKeyerDock::~DownstreamKeyerDock()
 	ClearKeyers();
 }
 
+void DownstreamKeyerDock::SetTransitions(get_transitions_callback_t gt, void *gtd)
+{
+	get_transitions = gt;
+	get_transitions_data = gtd;
+}
+
 void DownstreamKeyerDock::Save(obs_data_t *data)
 {
 	obs_data_array_t *keyers = obs_data_array_create();
@@ -319,6 +459,8 @@ void DownstreamKeyerDock::Save(obs_data_t *data)
 
 void DownstreamKeyerDock::Load(obs_data_t *data)
 {
+	if (loaded)
+		return;
 	obs_data_array_t *keyers = nullptr;
 	if (!viewName.empty()) {
 		std::string s = viewName;
@@ -344,7 +486,7 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 		for (size_t i = 0; i < count; i++) {
 			auto keyerData = obs_data_array_item(keyers, i);
 			auto keyer = new DownstreamKeyer((int)(outputChannel + i), QT_UTF8(obs_data_get_string(keyerData, "name")),
-							 view, get_transitions, get_transitions_data);
+							 view, canvas, get_transitions, get_transitions_data);
 			keyer->Load(keyerData);
 			tabs->addTab(keyer, keyer->objectName());
 			obs_data_release(keyerData);
@@ -362,6 +504,7 @@ void DownstreamKeyerDock::ClearKeyers()
 		tabs->removeTab(0);
 		delete w;
 	}
+	loaded = false;
 }
 
 void DownstreamKeyerDock::AddDefaultKeyer()
@@ -369,11 +512,14 @@ void DownstreamKeyerDock::AddDefaultKeyer()
 	if (view) {
 		if (outputChannel < 1 || outputChannel >= MAX_CHANNELS)
 			outputChannel = 1;
+	} else if (canvas) {
+		if (outputChannel < 1 || outputChannel >= MAX_CHANNELS)
+			outputChannel = 1;
 	} else {
 		if (outputChannel < 7 || outputChannel >= MAX_CHANNELS)
 			outputChannel = 7;
 	}
-	auto keyer = new DownstreamKeyer(outputChannel, QT_UTF8(obs_module_text("DefaultName")), view, get_transitions,
+	auto keyer = new DownstreamKeyer(outputChannel, QT_UTF8(obs_module_text("DefaultName")), view, canvas, get_transitions,
 					 get_transitions_data);
 	tabs->addTab(keyer, keyer->objectName());
 }
@@ -396,6 +542,21 @@ void DownstreamKeyerDock::SceneChanged()
 		} else {
 			obs_source_release(source);
 		}
+	} else if (canvas) {
+		obs_source_t *source = obs_canvas_get_channel(canvas, 0);
+		if (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+			obs_source_t *ts = obs_transition_get_active_source(source);
+			if (ts) {
+				obs_source_release(source);
+				source = ts;
+			}
+		}
+		if (source && obs_source_is_scene(source)) {
+			scene = source;
+		} else {
+			obs_source_release(source);
+		}
+
 	} else {
 		scene = obs_frontend_get_current_scene();
 	}
@@ -546,7 +707,7 @@ void DownstreamKeyerDock::Add(QString name)
 	}
 	if (outputChannel < 7 || outputChannel >= MAX_CHANNELS)
 		outputChannel = 7;
-	auto keyer = new DownstreamKeyer(outputChannel + tabs->count(), name, view, get_transitions, get_transitions_data);
+	auto keyer = new DownstreamKeyer(outputChannel + tabs->count(), name, view, canvas, get_transitions, get_transitions_data);
 	tabs->addTab(keyer, keyer->objectName());
 }
 

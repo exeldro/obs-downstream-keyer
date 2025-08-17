@@ -18,7 +18,20 @@
 
 extern obs_websocket_vendor vendor;
 
-DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, get_transitions_callback_t gt, void *gtd)
+#if LIBOBS_API_VER < MAKE_SEMANTIC_VERSION(31, 1, 0)
+extern "C" {
+obs_source_t *(*obs_canvas_get_channel)(obs_canvas_t *canvas, uint32_t channel) = nullptr;
+void (*obs_canvas_set_channel)(obs_canvas_t *canvas, uint32_t channel, obs_source_t *source) = nullptr;
+obs_source_t *(*obs_canvas_get_source_by_name)(obs_canvas_t *canvas, const char *name) = nullptr;
+obs_canvas_t *(*obs_get_main_canvas)(void) = nullptr;
+void (*obs_canvas_release)(obs_canvas_t *canvas) = nullptr;
+void (*obs_enum_canvases)(bool (*enum_proc)(void *, obs_canvas_t *), void *param) = nullptr;
+const char *(*obs_canvas_get_name)(obs_canvas_t *canvas) = nullptr;
+}
+#endif
+
+DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_canvas_t *c, get_transitions_callback_t gt,
+				 void *gtd)
 	: outputChannel(channel),
 	  transition(nullptr),
 	  showTransition(nullptr),
@@ -28,6 +41,7 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, get_t
 	  showTransitionDuration(300),
 	  hideTransitionDuration(300),
 	  view(v),
+	  canvas(c),
 	  get_transitions(gt),
 	  get_transitions_data(gtd)
 {
@@ -156,6 +170,8 @@ DownstreamKeyer::~DownstreamKeyer()
 {
 	if (view) {
 		//obs_view_set_source(view, outputChannel, nullptr);
+	} else if (canvas) {
+		//obs_canvas_set_channel(canvas, outputChannel, nullptr);
 	} else {
 		obs_set_output_source(outputChannel, nullptr);
 	}
@@ -200,6 +216,20 @@ void DownstreamKeyer::on_actionAddScene_triggered()
 	obs_source_t *scene = nullptr;
 	if (view) {
 		obs_source_t *source = obs_view_get_source(view, 0);
+		if (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+			obs_source_t *ts = obs_transition_get_active_source(source);
+			if (ts) {
+				obs_source_release(source);
+				source = ts;
+			}
+		}
+		if (source && obs_source_is_scene(source)) {
+			scene = source;
+		} else {
+			obs_source_release(source);
+		}
+	} else if (canvas) {
+		obs_source_t *source = obs_canvas_get_channel(canvas, 0);
 		if (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
 			obs_source_t *ts = obs_transition_get_active_source(source);
 			if (ts) {
@@ -263,7 +293,9 @@ void DownstreamKeyer::apply_source(obs_source_t *const newSource)
 		hideTimer.setInterval(hideAfter);
 		hideTimer.start();
 	}
-	obs_source_t *prevSource = view ? obs_view_get_source(view, outputChannel) : obs_get_output_source(outputChannel);
+	obs_source_t *prevSource = view     ? obs_view_get_source(view, outputChannel)
+				   : canvas ? obs_canvas_get_channel(canvas, outputChannel)
+					    : obs_get_output_source(outputChannel);
 	obs_source_t *prevTransition = nullptr;
 	if (prevSource && obs_source_get_type(prevSource) == OBS_SOURCE_TYPE_TRANSITION) {
 		prevTransition = prevSource;
@@ -303,6 +335,8 @@ void DownstreamKeyer::apply_source(obs_source_t *const newSource)
 		if (!newTransition) {
 			if (view) {
 				obs_view_set_source(view, outputChannel, newSource);
+			} else if (canvas) {
+				obs_canvas_set_channel(canvas, outputChannel, newSource);
 			} else {
 				obs_set_output_source(outputChannel, newSource);
 			}
@@ -314,6 +348,8 @@ void DownstreamKeyer::apply_source(obs_source_t *const newSource)
 			if (prevTransition != newTransition) {
 				if (view) {
 					obs_view_set_source(view, outputChannel, newTransition);
+				} else if (canvas) {
+					obs_canvas_set_channel(canvas, outputChannel, newTransition);
 				} else {
 					obs_set_output_source(outputChannel, newTransition);
 				}
@@ -337,7 +373,9 @@ void DownstreamKeyer::apply_source(obs_source_t *const newSource)
 void DownstreamKeyer::apply_selected_source()
 {
 	const auto l = scenesList->selectedItems();
-	const auto newSource = l.count() ? obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text())) : nullptr;
+	const auto newSource = l.count() ? (canvas ? obs_canvas_get_source_by_name(canvas, QT_TO_UTF8(l.value(0)->text()))
+						   : obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text())))
+					 : nullptr;
 
 	apply_source(newSource);
 	obs_source_release(newSource);
@@ -463,13 +501,17 @@ void DownstreamKeyer::SetTransition(const char *transition_name, enum transition
 		overrideTransition = newTransition;
 	else
 		transition = newTransition;
-	obs_source_t *prevSource = view ? obs_view_get_source(view, outputChannel) : obs_get_output_source(outputChannel);
+	obs_source_t *prevSource = view     ? obs_view_get_source(view, outputChannel)
+				   : canvas ? obs_canvas_get_channel(canvas, outputChannel)
+					    : obs_get_output_source(outputChannel);
 	if (oldTransition && prevSource == oldTransition) {
 		if (newTransition) {
 			//swap transition
 			obs_transition_swap_begin(newTransition, oldTransition);
 			if (view) {
 				obs_view_set_source(view, outputChannel, newTransition);
+			} else if (canvas) {
+				obs_canvas_set_channel(canvas, outputChannel, newTransition);
 			} else {
 				obs_set_output_source(outputChannel, newTransition);
 			}
@@ -477,9 +519,12 @@ void DownstreamKeyer::SetTransition(const char *transition_name, enum transition
 		} else {
 			auto item = scenesList->currentItem();
 			if (item) {
-				auto scene = obs_get_source_by_name(QT_TO_UTF8(item->text()));
+				auto scene = canvas ? obs_canvas_get_source_by_name(canvas, QT_TO_UTF8(item->text()))
+						    : obs_get_source_by_name(QT_TO_UTF8(item->text()));
 				if (view) {
 					obs_view_set_source(view, outputChannel, scene);
+				} else if (canvas) {
+					obs_canvas_set_channel(canvas, outputChannel, scene);
 				} else {
 					obs_set_output_source(outputChannel, scene);
 				}
@@ -487,6 +532,8 @@ void DownstreamKeyer::SetTransition(const char *transition_name, enum transition
 			} else {
 				if (view) {
 					obs_view_set_source(view, outputChannel, nullptr);
+				} else if (canvas) {
+					obs_canvas_set_channel(canvas, outputChannel, nullptr);
 				} else {
 					obs_set_output_source(outputChannel, nullptr);
 				}
@@ -547,7 +594,9 @@ void DownstreamKeyer::SceneChanged(std::string scene)
 		apply_source(nullptr);
 		return;
 	} else {
-		obs_source_t *prevSource = view ? obs_view_get_source(view, outputChannel) : obs_get_output_source(outputChannel);
+		obs_source_t *prevSource = view     ? obs_view_get_source(view, outputChannel)
+					   : canvas ? obs_canvas_get_channel(canvas, outputChannel)
+						    : obs_get_output_source(outputChannel);
 		if (prevSource && obs_source_get_type(prevSource) == OBS_SOURCE_TYPE_TRANSITION) {
 			obs_source_t *prevTransition = prevSource;
 			prevSource = obs_transition_get_active_source(prevTransition);
@@ -586,11 +635,14 @@ void DownstreamKeyer::Load(obs_data_t *data)
 			const auto source_name = obs_data_get_string(sceneData, "name");
 			const auto item = new QListWidgetItem(QT_UTF8(source_name));
 			scenesList->addItem(item);
-			obs_source_t *source = obs_get_source_by_name(source_name);
+			obs_source_t *source = canvas ? obs_canvas_get_source_by_name(canvas, source_name)
+						      : obs_get_source_by_name(source_name);
 			if (item->text() == sceneName) {
 				if (source) {
 					if (view) {
 						obs_view_set_source(view, outputChannel, source);
+					} else if (canvas) {
+						obs_canvas_set_channel(canvas, outputChannel, source);
 					} else {
 						obs_set_output_source(outputChannel, source);
 					}
@@ -775,6 +827,20 @@ void DownstreamKeyer::AddExcludeScene(const char *scene_name)
 		} else {
 			obs_source_release(source);
 		}
+	} else if (canvas) {
+		obs_source_t *source = obs_canvas_get_channel(canvas, 0);
+		if (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+			obs_source_t *ts = obs_transition_get_active_source(source);
+			if (ts) {
+				obs_source_release(source);
+				source = ts;
+			}
+		}
+		if (source && obs_source_is_scene(source)) {
+			scene = source;
+		} else {
+			obs_source_release(source);
+		}
 	} else {
 		scene = obs_frontend_get_current_scene();
 	}
@@ -790,6 +856,20 @@ void DownstreamKeyer::RemoveExcludeScene(const char *scene_name)
 	obs_source_t *scene = nullptr;
 	if (view) {
 		obs_source_t *source = obs_view_get_source(view, 0);
+		if (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+			obs_source_t *ts = obs_transition_get_active_source(source);
+			if (ts) {
+				obs_source_release(source);
+				source = ts;
+			}
+		}
+		if (source && obs_source_is_scene(source)) {
+			scene = source;
+		} else {
+			obs_source_release(source);
+		}
+	} else if (canvas) {
+		obs_source_t *source = obs_canvas_get_channel(canvas, 0);
 		if (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
 			obs_source_t *ts = obs_transition_get_active_source(source);
 			if (ts) {
@@ -881,7 +961,7 @@ bool DownstreamKeyer::AddScene(QString scene_name, int insertBeforeRow)
 	}
 	auto nameUtf8 = scene_name.toUtf8();
 	auto name = nameUtf8.constData();
-	auto s = obs_get_source_by_name(name);
+	auto s = canvas ? obs_canvas_get_source_by_name(canvas, name) : obs_get_source_by_name(name);
 	if (obs_source_is_scene(s)) {
 		add_scene(scene_name, s, insertBeforeRow);
 		obs_source_release(s);
@@ -920,7 +1000,9 @@ void DownstreamKeyer::SetOutputChannel(int oc)
 {
 	if (oc == outputChannel)
 		return;
-	obs_source_t *prevSource = view ? obs_view_get_source(view, outputChannel) : obs_get_output_source(outputChannel);
+	obs_source_t *prevSource = view     ? obs_view_get_source(view, outputChannel)
+				   : canvas ? obs_canvas_get_channel(canvas, outputChannel)
+					    : obs_get_output_source(outputChannel);
 	obs_source_t *prevTransition = nullptr;
 	if (prevSource && obs_source_get_type(prevSource) == OBS_SOURCE_TYPE_TRANSITION) {
 		prevTransition = prevSource;
@@ -931,6 +1013,8 @@ void DownstreamKeyer::SetOutputChannel(int oc)
 		    prevTransition == overrideTransition) {
 			if (view) {
 				obs_view_set_source(view, outputChannel, nullptr);
+			} else if (canvas) {
+				obs_canvas_set_channel(canvas, outputChannel, nullptr);
 			} else {
 				obs_set_output_source(outputChannel, nullptr);
 			}
@@ -940,10 +1024,14 @@ void DownstreamKeyer::SetOutputChannel(int oc)
 		}
 	} else if (prevSource) {
 		const auto l = scenesList->selectedItems();
-		const auto newSource = l.count() ? obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text())) : nullptr;
+		const auto newSource = l.count() ? (canvas ? obs_canvas_get_source_by_name(canvas, QT_TO_UTF8(l.value(0)->text()))
+							   : obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text())))
+						 : nullptr;
 		if (prevSource == newSource) {
 			if (view) {
 				obs_view_set_source(view, outputChannel, nullptr);
+			} else if (canvas) {
+				obs_canvas_set_channel(canvas, outputChannel, nullptr);
 			} else {
 				obs_set_output_source(outputChannel, nullptr);
 			}
@@ -957,6 +1045,8 @@ void DownstreamKeyer::SetOutputChannel(int oc)
 	if (prevTransition) {
 		if (view) {
 			obs_view_set_source(view, outputChannel, prevTransition);
+		} else if (canvas) {
+			obs_canvas_set_channel(canvas, outputChannel, prevTransition);
 		} else {
 			obs_set_output_source(outputChannel, prevTransition);
 		}
