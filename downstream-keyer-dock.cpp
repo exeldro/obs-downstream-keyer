@@ -87,19 +87,7 @@ static DownstreamKeyerDock *add_dock(const char *viewName, obs_view_t *view, obs
 	QString name = QString::fromUtf8(viewName);
 	name += "DownstreamKeyerDock";
 
-#if LIBOBS_API_VER >= MAKE_SEMANTIC_VERSION(30, 0, 0)
 	obs_frontend_add_dock_by_id(QT_TO_UTF8(name), QT_TO_UTF8(title), dsk);
-#else
-	auto dock = new QDockWidget(main_window);
-	dock->setObjectName(name);
-	dock->setWindowTitle(title);
-	dock->setWidget(dsk);
-	dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
-	dock->setFloating(true);
-	dock->hide();
-	//auto *a = static_cast<QAction *>(obs_frontend_add_dock(dock));
-	obs_frontend_add_dock(dock);
-#endif
 	_dsks[viewName] = dsk;
 	obs_frontend_pop_ui_translation();
 	if (load_data)
@@ -160,13 +148,9 @@ static void proc_remove_view(void *data, calldata_t *cd)
 	if (_dsks.find(viewName) == _dsks.end()) {
 		return;
 	}
-#if LIBOBS_API_VER >= MAKE_SEMANTIC_VERSION(30, 0, 0)
 	std::string name = viewName;
 	name += "DownstreamKeyerDock";
 	obs_frontend_remove_dock(name.c_str());
-#else
-	delete _dsks[viewName];
-#endif
 	_dsks.erase(viewName);
 }
 
@@ -179,22 +163,14 @@ static void proc_remove_canvas(void *data, calldata_t *cd)
 	if (_dsks.find(viewName) == _dsks.end()) {
 		return;
 	}
-#if LIBOBS_API_VER >= MAKE_SEMANTIC_VERSION(30, 0, 0)
 	std::string name = viewName;
 	name += "DownstreamKeyerDock";
 	obs_frontend_remove_dock(name.c_str());
-#else
-	delete _dsks[viewName];
-#endif
 	_dsks.erase(viewName);
 }
 
 static void refresh_canvas()
 {
-#if LIBOBS_API_VER < MAKE_SEMANTIC_VERSION(31, 1, 0)
-	if (!obs_enum_canvases)
-		return;
-#endif
 	obs_canvas_t *main_canvas = obs_get_main_canvas();
 	obs_enum_canvases(
 		[](void *param, obs_canvas_t *canvas) {
@@ -237,48 +213,12 @@ bool obs_module_load()
 	blog(LOG_INFO, "[Downstream Keyer] loaded version %s", PROJECT_VERSION);
 	obs_register_source(&output_source_info);
 
-#if LIBOBS_API_VER < MAKE_SEMANTIC_VERSION(31, 1, 0)
-	if (obs_get_version() >= MAKE_SEMANTIC_VERSION(31, 1, 0)) {
-#ifdef _WIN32
-		void *dl = os_dlopen("obs");
-#else
-		void *dl = dlopen(nullptr, RTLD_LAZY);
-#endif
-		if (dl) {
-			obs_canvas_get_channel = (obs_source_t * (*)(obs_canvas_t * canvas, uint32_t channel))
-				os_dlsym(dl, "obs_canvas_get_channel");
-			obs_canvas_set_channel = (void (*)(obs_canvas_t *canvas, uint32_t channel,
-							   obs_source_t *source))os_dlsym(dl, "obs_canvas_set_channel");
-			obs_canvas_get_source_by_name = (obs_source_t * (*)(obs_canvas_t * canvas, const char *name))
-				os_dlsym(dl, "obs_canvas_get_source_by_name");
-			obs_get_main_canvas = (obs_canvas_t * (*)(void)) os_dlsym(dl, "obs_get_main_canvas");
-			obs_canvas_release = (void (*)(obs_canvas_t *canvas))os_dlsym(dl, "obs_canvas_release");
-			obs_enum_canvases =
-				(void (*)(bool (*enum_proc)(void *, obs_canvas_t *), void *param))os_dlsym(dl, "obs_enum_canvases");
-			obs_canvas_get_name = (const char *(*)(obs_canvas_t *canvas))os_dlsym(dl, "obs_canvas_get_name");
-			os_dlclose(dl);
-		}
-	}
-#endif
-
 	const auto main_window = static_cast<QMainWindow *>(obs_frontend_get_main_window());
 	obs_frontend_push_ui_translation(obs_module_get_string);
 
 	auto dsk = new DownstreamKeyerDock(main_window);
 
-#if LIBOBS_API_VER >= MAKE_SEMANTIC_VERSION(30, 0, 0)
 	obs_frontend_add_dock_by_id("DownstreamKeyerDock", obs_module_text("DownstreamKeyer"), dsk);
-#else
-	auto dock = new QDockWidget(main_window);
-	dock->setObjectName(QString::fromUtf8("DownstreamKeyerDock"));
-	dock->setWindowTitle(QT_UTF8(obs_module_text("DownstreamKeyer")));
-	dock->setWidget(dsk);
-	dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
-	dock->setFloating(true);
-	dock->hide();
-	//auto *a = static_cast<QAction *>(obs_frontend_add_dock(dock));
-	obs_frontend_add_dock(dock);
-#endif
 	_dsks[""] = dsk;
 	obs_frontend_pop_ui_translation();
 	auto ph = obs_get_proc_handler();
@@ -318,9 +258,7 @@ void obs_module_unload()
 	obs_frontend_remove_event_callback(frontend_event, nullptr);
 	obs_frontend_remove_save_callback(frontend_save_load, nullptr);
 	_dsks.clear();
-#if LIBOBS_API_VER >= MAKE_SEMANTIC_VERSION(30, 0, 0)
 	obs_frontend_remove_dock("DownstreamKeyerDock");
-#endif
 	if (!vendor || !obs_get_module("obs-websocket"))
 		return;
 	obs_websocket_vendor_unregister_request(vendor, "get_downstream_keyers");

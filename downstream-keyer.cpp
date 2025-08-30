@@ -18,18 +18,6 @@
 
 extern obs_websocket_vendor vendor;
 
-#if LIBOBS_API_VER < MAKE_SEMANTIC_VERSION(31, 1, 0)
-extern "C" {
-obs_source_t *(*obs_canvas_get_channel)(obs_canvas_t *canvas, uint32_t channel) = nullptr;
-void (*obs_canvas_set_channel)(obs_canvas_t *canvas, uint32_t channel, obs_source_t *source) = nullptr;
-obs_source_t *(*obs_canvas_get_source_by_name)(obs_canvas_t *canvas, const char *name) = nullptr;
-obs_canvas_t *(*obs_get_main_canvas)(void) = nullptr;
-void (*obs_canvas_release)(obs_canvas_t *canvas) = nullptr;
-void (*obs_enum_canvases)(bool (*enum_proc)(void *, obs_canvas_t *), void *param) = nullptr;
-const char *(*obs_canvas_get_name)(obs_canvas_t *canvas) = nullptr;
-}
-#endif
-
 DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_canvas_t *c, get_transitions_callback_t gt,
 				 void *gtd)
 	: outputChannel(channel),
