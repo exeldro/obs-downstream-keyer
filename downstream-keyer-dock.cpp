@@ -327,6 +327,20 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v,
 	if (vn)
 		viewName = vn;
 
+	if (canvas) {
+		auto sh = obs_canvas_get_signal_handler(canvas);
+		signal_handler_connect(
+			sh, "remove",
+			[](void *data, calldata_t *cd) {
+				UNUSED_PARAMETER(cd);
+				auto dock = static_cast<DownstreamKeyerDock *>(data);
+				dock->closing = true;
+				dock->ClearKeyers();
+				dock->deleteLater();
+			},
+			this);
+	}
+
 	tabs = new QTabWidget(this);
 	tabs->setMovable(true);
 
@@ -463,6 +477,8 @@ void DownstreamKeyerDock::AddDefaultKeyer()
 }
 void DownstreamKeyerDock::SceneChanged()
 {
+	if (closing)
+		return;
 	const int count = tabs->count();
 
 	obs_source_t *scene = nullptr;
