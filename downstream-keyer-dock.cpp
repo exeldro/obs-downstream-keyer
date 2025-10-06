@@ -32,6 +32,7 @@ extern "C" {
 size_t get_view_count();
 const char *get_view_name(size_t idx);
 obs_view_t *get_view_by_name(const char *view_name);
+obs_canvas_t *get_canvas_by_name(const char *view_name);
 obs_source_t *get_source_from_view(const char *view_name, uint32_t channel);
 };
 
@@ -61,6 +62,15 @@ obs_view_t *get_view_by_name(const char *view_name)
 	return view;
 }
 
+obs_canvas_t *get_canvas_by_name(const char *view_name)
+{
+	auto it = _dsks.find(view_name);
+	if (it == _dsks.end())
+		return NULL;
+	obs_canvas_t *canvas = it->second->GetCanvas();
+	return canvas;
+}
+
 obs_source_t *get_source_from_view(const char *view_name, uint32_t channel)
 {
 	obs_source_t *source = nullptr;
@@ -69,6 +79,12 @@ obs_source_t *get_source_from_view(const char *view_name, uint32_t channel)
 		obs_view_t *view = it->second->GetView();
 		if (view) {
 			source = obs_view_get_source(view, channel);
+		} else {
+			obs_canvas_t *canvas = it->second->GetCanvas();
+			if (canvas) {
+				source = obs_canvas_get_channel(canvas, channel);
+				obs_canvas_release(canvas);
+			}
 		}
 	}
 	return source;
