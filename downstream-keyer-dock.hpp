@@ -3,11 +3,12 @@
 #include <qmenu.h>
 #include <QTabWidget>
 #include <QVBoxLayout>
+#include <QFrame>
 #include <obs-frontend-api.h>
 #include "downstream-keyer.hpp"
 #include "obs-websocket-api.h"
 
-class DownstreamKeyerDock : public QWidget {
+class DownstreamKeyerDock : public QFrame {
 	Q_OBJECT
 private:
 	QTabWidget *tabs;
