@@ -329,7 +329,7 @@ void DownstreamKeyerDock::frontend_event(enum obs_frontend_event event, void *da
 }
 
 DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v, obs_canvas_t *c, const char *vn)
-	: QWidget(parent),
+	: QFrame(parent),
 	  outputChannel(oc),
 	  loaded(false),
 	  view(v),
