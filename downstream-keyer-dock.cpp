@@ -518,7 +518,7 @@ void DownstreamKeyerDock::SceneChanged()
 		}
 	} else if (canvas) {
 		obs_canvas_t *c = obs_weak_canvas_get_canvas(canvas);
-		obs_source_t *source = c ? obs_canvas_get_channel(c, 0) : nullptr;
+		obs_source_t *source = c && !obs_canvas_removed(c) ? obs_canvas_get_channel(c, 0) : nullptr;
 		obs_canvas_release(c);
 		if (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
 			obs_source_t *ts = obs_transition_get_active_source(source);
