@@ -504,11 +504,13 @@ void DownstreamKeyerDock::SceneChanged()
 	obs_source_t *scene = nullptr;
 	if (view) {
 		obs_source_t *source = obs_view_get_source(view, 0);
-		if (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+		while (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
 			obs_source_t *ts = obs_transition_get_active_source(source);
 			if (ts) {
 				obs_source_release(source);
 				source = ts;
+			} else {
+				break;
 			}
 		}
 		if (source && obs_source_is_scene(source)) {
@@ -520,11 +522,13 @@ void DownstreamKeyerDock::SceneChanged()
 		obs_canvas_t *c = obs_weak_canvas_get_canvas(canvas);
 		obs_source_t *source = c && !obs_canvas_removed(c) ? obs_canvas_get_channel(c, 0) : nullptr;
 		obs_canvas_release(c);
-		if (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+		while (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
 			obs_source_t *ts = obs_transition_get_active_source(source);
 			if (ts) {
 				obs_source_release(source);
 				source = ts;
+			} else {
+				break;
 			}
 		}
 		if (source && obs_source_is_scene(source)) {
@@ -594,7 +598,7 @@ void DownstreamKeyerDock::AddTransitionMenu(QMenu *tm, enum transitionType trans
 		if (w)
 			w->SetTransitionDuration(duration, transition_type);
 	};
-	connect(duration, (void(QSpinBox::*)(int)) & QSpinBox::valueChanged, setDuration);
+	connect(duration, (void (QSpinBox::*)(int))&QSpinBox::valueChanged, setDuration);
 
 	QWidgetAction *durationAction = new QWidgetAction(tm);
 	durationAction->setDefaultWidget(duration);
@@ -665,7 +669,7 @@ void DownstreamKeyerDock::ConfigClicked()
 		if (w)
 			w->SetHideAfter(duration);
 	};
-	connect(duration, (void(QSpinBox::*)(int)) & QSpinBox::valueChanged, setDuration);
+	connect(duration, (void (QSpinBox::*)(int))&QSpinBox::valueChanged, setDuration);
 	QWidgetAction *durationAction = new QWidgetAction(tm);
 	durationAction->setDefaultWidget(duration);
 

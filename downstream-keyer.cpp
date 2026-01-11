@@ -204,11 +204,13 @@ void DownstreamKeyer::on_actionAddScene_triggered()
 	obs_source_t *scene = nullptr;
 	if (view) {
 		obs_source_t *source = obs_view_get_source(view, 0);
-		if (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+		while (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
 			obs_source_t *ts = obs_transition_get_active_source(source);
 			if (ts) {
 				obs_source_release(source);
 				source = ts;
+			} else {
+				break;
 			}
 		}
 		if (source && obs_source_is_scene(source)) {
@@ -218,11 +220,13 @@ void DownstreamKeyer::on_actionAddScene_triggered()
 		}
 	} else if (canvas) {
 		obs_source_t *source = obs_canvas_get_channel(canvas, 0);
-		if (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+		while (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
 			obs_source_t *ts = obs_transition_get_active_source(source);
 			if (ts) {
 				obs_source_release(source);
 				source = ts;
+			} else {
+				break;
 			}
 		}
 		if (source && obs_source_is_scene(source)) {
@@ -803,11 +807,13 @@ void DownstreamKeyer::AddExcludeScene(const char *scene_name)
 	obs_source_t *scene = nullptr;
 	if (view) {
 		obs_source_t *source = obs_view_get_source(view, 0);
-		if (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+		while (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
 			obs_source_t *ts = obs_transition_get_active_source(source);
 			if (ts) {
 				obs_source_release(source);
 				source = ts;
+			} else {
+				break;
 			}
 		}
 		if (source && obs_source_is_scene(source)) {
@@ -817,11 +823,13 @@ void DownstreamKeyer::AddExcludeScene(const char *scene_name)
 		}
 	} else if (canvas) {
 		obs_source_t *source = obs_canvas_get_channel(canvas, 0);
-		if (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+		while (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
 			obs_source_t *ts = obs_transition_get_active_source(source);
 			if (ts) {
 				obs_source_release(source);
 				source = ts;
+			} else {
+				break;
 			}
 		}
 		if (source && obs_source_is_scene(source)) {
@@ -844,11 +852,13 @@ void DownstreamKeyer::RemoveExcludeScene(const char *scene_name)
 	obs_source_t *scene = nullptr;
 	if (view) {
 		obs_source_t *source = obs_view_get_source(view, 0);
-		if (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+		while (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
 			obs_source_t *ts = obs_transition_get_active_source(source);
 			if (ts) {
 				obs_source_release(source);
 				source = ts;
+			} else {
+				break;
 			}
 		}
 		if (source && obs_source_is_scene(source)) {
@@ -858,11 +868,13 @@ void DownstreamKeyer::RemoveExcludeScene(const char *scene_name)
 		}
 	} else if (canvas) {
 		obs_source_t *source = obs_canvas_get_channel(canvas, 0);
-		if (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+		while (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
 			obs_source_t *ts = obs_transition_get_active_source(source);
 			if (ts) {
 				obs_source_release(source);
 				source = ts;
+			} else {
+				break;
 			}
 		}
 		if (source && obs_source_is_scene(source)) {

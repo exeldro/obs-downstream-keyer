@@ -88,13 +88,14 @@ static bool view_changed(void *priv, obs_properties_t *props, obs_property_t *pr
 		obs_source_t *source = view ? obs_view_get_source(view, i)
 					    : (canvas ? obs_canvas_get_channel(canvas, i) : obs_get_output_source(i));
 		if (source) {
-			if (obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+			while (obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
 				obs_source_t *transition = source;
 				source = obs_transition_get_active_source(transition);
 				if (source) {
 					obs_source_release(transition);
 				} else {
 					source = transition;
+					break;
 				}
 			}
 			dstr_cat(&buffer, " - ");
