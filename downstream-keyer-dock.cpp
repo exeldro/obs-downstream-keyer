@@ -390,6 +390,7 @@ DownstreamKeyerDock::~DownstreamKeyerDock()
 	obs_frontend_remove_save_callback(frontend_save_load, this);
 	obs_frontend_remove_event_callback(frontend_event, this);
 	ClearKeyers();
+	obs_weak_canvas_release(canvas);
 }
 
 void DownstreamKeyerDock::SetTransitions(get_transitions_callback_t gt, void *gtd)
