@@ -26,7 +26,9 @@ private:
 	QString GetScene(QString dskName);
 	bool SwitchDSK(QString dskName, QString sceneName);
 	bool AddScene(QString dskName, QString sceneName, int insertBeforeRow);
+	bool AddPausePoint(QString dskName, QString pauseName, int insertBeforeRow);
 	bool RemoveScene(QString dskName, QString sceneName);
+	bool RemoveAllScenes(QString dskName);
 	bool SetTie(QString dskName, bool tie);
 	bool SetTransition(const QString &chars, const char *transition, int duration, transitionType tt);
 	bool AddExcludeScene(QString dskName, const char *sceneName);
@@ -60,10 +62,12 @@ public:
 	static void get_downstream_keyer(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void add_downstream_keyer(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void remove_downstream_keyer(obs_data_t *request_data, obs_data_t *response_data, void *param);
-	static void get_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void change_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void add_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
+	static void get_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
+	static void add_pause_point(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void remove_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
+	static void remove_all_scenes(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void set_tie(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void set_transition(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void add_exclude_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
