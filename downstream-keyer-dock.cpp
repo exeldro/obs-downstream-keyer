@@ -237,8 +237,9 @@ static void frontend_save_load(obs_data_t *save_data, bool saving, void *data)
 {
 	UNUSED_PARAMETER(data);
 	load_data = save_data;
-	if (!saving)
+	if (!saving) {
 		refresh_canvas();
+	}
 }
 
 bool obs_module_load()
@@ -366,16 +367,7 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v,
 
 	if (c) {
 		auto sh = obs_canvas_get_signal_handler(c);
-		signal_handler_connect(
-			sh, "remove",
-			[](void *data, calldata_t *cd) {
-				UNUSED_PARAMETER(cd);
-				auto dock = static_cast<DownstreamKeyerDock *>(data);
-				dock->closing = true;
-				dock->ClearKeyers();
-				dock->deleteLater();
-			},
-			this);
+		signal_handler_connect(sh, "remove", remove_canvas, this);
 	}
 
 	tabs = new QTabWidget(this);
@@ -413,6 +405,12 @@ DownstreamKeyerDock::~DownstreamKeyerDock()
 	obs_frontend_remove_save_callback(frontend_save_load, this);
 	obs_frontend_remove_event_callback(frontend_event, this);
 	ClearKeyers();
+	auto c = obs_weak_canvas_get_canvas(canvas);
+	if (c) {
+		auto sh = obs_canvas_get_signal_handler(c);
+		signal_handler_disconnect(sh, "remove", remove_canvas, this);
+		obs_canvas_release(c);
+	}
 	obs_weak_canvas_release(canvas);
 }
 
@@ -1170,4 +1168,13 @@ void DownstreamKeyerDock::remove_exclude_scene(obs_data_t *request_data, obs_dat
 		return;
 	}
 	obs_data_set_bool(response_data, "success", dsk->RemoveExcludeScene(QString::fromUtf8(dsk_name), scene_name));
+}
+
+void DownstreamKeyerDock::remove_canvas(void *data, calldata_t *cd)
+{
+	UNUSED_PARAMETER(cd);
+	auto dock = static_cast<DownstreamKeyerDock *>(data);
+	dock->closing = true;
+	dock->ClearKeyers();
+	dock->deleteLater();
 }

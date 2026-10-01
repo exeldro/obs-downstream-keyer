@@ -68,4 +68,5 @@ public:
 	static void set_transition(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void add_exclude_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void remove_exclude_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
+	static void remove_canvas(void *data, calldata_t *cd);
 };
