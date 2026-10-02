@@ -69,6 +69,14 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_c
 	connect(actionAddScene, SIGNAL(triggered()), this, SLOT(on_actionAddScene_triggered()));
 	scenesToolbar->addAction(actionAddScene);
 
+	auto actionAddPause = new QAction(this);
+	actionAddPause->setObjectName(QStringLiteral("actionAddPause"));
+	actionAddPause->setProperty("themeID", "pauseIconSmall");
+	actionAddPause->setProperty("class", "icon-media-pause");
+	actionAddPause->setText(QT_UTF8(obs_module_text("AddPause")));
+	connect(actionAddPause, SIGNAL(triggered()), this, SLOT(on_actionAddPausePoint_triggered()));
+	scenesToolbar->addAction(actionAddPause);
+
 	auto actionRemoveScene = new QAction(this);
 	actionRemoveScene->setObjectName(QStringLiteral("actionRemoveScene"));
 	actionRemoveScene->setShortcutContext(Qt::WidgetWithChildrenShortcut);
@@ -100,8 +108,8 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_c
 
 	auto actionSceneNull = new QAction(this);
 	actionSceneNull->setObjectName(QStringLiteral("actionSceneNull"));
-	actionSceneNull->setProperty("themeID", "pauseIconSmall");
-	actionSceneNull->setProperty("class", "icon-media-pause");
+	actionSceneNull->setProperty("themeID", "stopIconSmall");
+	actionSceneNull->setProperty("class", "icon-media-stop");
 	actionSceneNull->setText(QT_UTF8(obs_module_text("None")));
 	connect(actionSceneNull, SIGNAL(triggered()), this, SLOT(on_actionSceneNull_triggered()));
 	scenesToolbar->addAction(actionSceneNull);
@@ -247,6 +255,29 @@ void DownstreamKeyer::on_actionAddScene_triggered()
 	}
 
 	obs_source_release(scene);
+}
+void DownstreamKeyer::on_actionAddPausePoint_triggered() {
+	// add a message box in...
+	QString pause_name = QT_UTF8(obs_module_text("DefaultPauseName"));
+	std::string tmp = pause_name.toUtf8().constData();
+	if (NameDialog::AskForName(this, tmp)) {
+
+		auto pauseName2 = pause_name;
+		int alreadyExistsCounter = scenesList->findItems(pauseName2, Qt::MatchFixedString).count();
+		while (alreadyExistsCounter > 0) {
+			/* Add (2), (3), etc as needed. */
+			pauseName2 = QString::fromUtf8(tmp.c_str()) + " (" + QString::number(alreadyExistsCounter+1) + ")";
+			if (scenesList->findItems(pauseName2, Qt::MatchFixedString).count() == 0) {
+				alreadyExistsCounter = 0;
+			} else {
+				alreadyExistsCounter++;
+			}
+
+		}
+		const auto currentRow = scenesList->currentRow();
+		add_pause_point(pauseName2,currentRow);
+	}
+
 }
 
 void DownstreamKeyer::on_actionRemoveScene_triggered()
@@ -969,6 +1000,50 @@ bool DownstreamKeyer::AddScene(QString scene_name, int insertBeforeRow)
 	}
 	obs_source_release(s);
 	return false;
+}
+void DownstreamKeyer::add_pause_point(QString pause_name, int insertBeforeRow)
+{
+	const auto item = new QListWidgetItem(pause_name);
+	int scenesListCount = scenesList->count();
+	if ((insertBeforeRow > scenesListCount) || (insertBeforeRow < 0)) {
+		insertBeforeRow = scenesListCount;
+	}
+	scenesList->insertItem(insertBeforeRow, item);
+
+	std::string enable_hotkey = obs_module_text("EnableDSK");
+	enable_hotkey += " ";
+	enable_hotkey += QT_TO_UTF8(objectName());
+	std::string disable_hotkey = obs_module_text("DisableDSK");
+	disable_hotkey += " ";
+	disable_hotkey += QT_TO_UTF8(objectName());
+	uint64_t h = obs_hotkey_pair_register_source(
+		nullptr, enable_hotkey.c_str(), enable_hotkey.c_str(),
+		disable_hotkey.c_str(), disable_hotkey.c_str(),
+		enable_DSK_hotkey, disable_DSK_hotkey, this, this);
+
+	if (h != OBS_INVALID_HOTKEY_PAIR_ID) {
+		item->setData(Qt::UserRole, static_cast<uint>(h));
+	}
+}
+
+
+bool DownstreamKeyer::AddPausePoint(QString pause_name, int insertBeforeRow)
+{
+	add_pause_point(pause_name, insertBeforeRow);
+	return true;
+
+}
+
+
+bool DownstreamKeyer::RemoveAllScenes()
+{
+	while (scenesList->count()) {
+		const auto item = scenesList->item(0);
+		scenesList->removeItemWidget(item);
+		obs_hotkey_pair_unregister(item->data(Qt::UserRole).toUInt());
+		delete item;
+	}
+	return true;
 }
 
 bool DownstreamKeyer::RemoveScene(QString scene_name)
