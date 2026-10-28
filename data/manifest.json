@@ -1,0 +1,16 @@
+{
+    "display_name": "Downstream Keyer",
+    "id": "e9b6e9ee-97f6-4107-a359-15f114cb6aa1",
+    "version": "0.4.5",
+    "authors": ["Exeldro"],
+    "name": "downstream-keyer",
+    "description": "Downstream Keyer dock",
+    "long_description": "Adds dock to OBS that allows you to have downstream keyers",
+    "urls": {
+        "repository": "https://github.com/exeldro/obs-downstream-keyer",
+        "website": "https://obsproject.com/forum/resources/downstream-keyer.1254/",
+        "support": "https://obsproject.com/forum/threads/downstream-keyer.142247/"
+    },
+    "has_banner": false,
+    "has_icon": false
+}
