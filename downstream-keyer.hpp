@@ -49,6 +49,8 @@ private:
 	std::set<std::string> exclude_scenes;
 	// program scene name -> keyer scene name to load when that program scene goes live
 	std::map<std::string, std::string> load_scenes;
+	// keyer scene loaded by load_scenes, unloaded again when leaving the mapped program scene
+	std::string autoLoadedScene;
 	obs_view_t *view = nullptr;
 	obs_canvas_t *canvas = nullptr;
 	get_transitions_callback_t get_transitions = nullptr;

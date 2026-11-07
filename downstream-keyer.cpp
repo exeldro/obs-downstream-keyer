@@ -606,6 +606,20 @@ void DownstreamKeyer::SceneChanged(std::string scene)
 			items.first()->setSelected(true);
 			scenesList->blockSignals(false);
 			apply_selected_source();
+			autoLoadedScene = load->second;
+			return;
+		}
+	}
+
+	if (!autoLoadedScene.empty()) {
+		// Leaving a mapped scene: unload what we loaded, unless the user picked something else since.
+		const bool stillShowing = GetScene() == QT_UTF8(autoLoadedScene.c_str());
+		autoLoadedScene.clear();
+		if (stillShowing) {
+			scenesList->blockSignals(true);
+			on_actionSceneNull_triggered();
+			scenesList->blockSignals(false);
+			apply_source(nullptr);
 			return;
 		}
 	}
