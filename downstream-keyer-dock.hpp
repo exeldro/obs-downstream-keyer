@@ -31,12 +31,14 @@ private:
 	bool SetTransition(const QString &chars, const char *transition, int duration, transitionType tt);
 	bool AddExcludeScene(QString dskName, const char *sceneName);
 	bool RemoveExcludeScene(QString dskName, const char *sceneName);
+	bool SetLoadScene(QString dskName, const char *programSceneName, const char *dskSceneName);
 
 	void ClearKeyers();
 	void AddDefaultKeyer();
 	void ConfigClicked();
 	void AddTransitionMenu(QMenu *tm, enum transitionType transition_type);
 	void AddExcludeSceneMenu(QMenu *tm);
+	void AddLoadSceneMenu(QMenu *tm);
 private slots:
 	void SceneChanged();
 	void Add(QString name = "");
@@ -68,5 +70,6 @@ public:
 	static void set_transition(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void add_exclude_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void remove_exclude_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
+	static void set_load_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void remove_canvas(void *data, calldata_t *cd);
 };
