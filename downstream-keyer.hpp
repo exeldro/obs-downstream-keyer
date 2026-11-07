@@ -46,7 +46,7 @@ private:
 	obs_hotkey_id null_hotkey_id;
 	obs_hotkey_pair_id tie_hotkey_id;
 	std::set<std::string> exclude_scenes;
-	// program scene name -> keyer scene name to load when that program scene goes live
+	// program scene names the keyer output is shown on (Load On Scene)
 	// when non-empty, the keyer output is only on while one of these program scenes is live
 	std::set<std::string> load_scenes;
 	obs_view_t *view = nullptr;
