@@ -1,6 +1,11 @@
 name: Build Project
 on:
   workflow_call:
+    inputs:
+      windows_only:
+        description: Skip the macOS and Ubuntu builds
+        type: boolean
+        default: false
     outputs:
       pluginName:
         description: Project name detected by parsing build spec file
@@ -75,6 +80,7 @@ jobs:
     name: Build for macOS 🍏
     runs-on: macos-15
     needs: check-event
+    if: ${{ !inputs.windows_only }}
     defaults:
       run:
         shell: zsh --no-rcs --errexit --pipefail {0}
@@ -182,6 +188,7 @@ jobs:
         os: [ubuntu-24.04, ubuntu-26.04]
     runs-on: ${{ matrix.os }}
     needs: check-event
+    if: ${{ !inputs.windows_only }}
     defaults:
       run:
         shell: bash

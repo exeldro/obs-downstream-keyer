@@ -8,11 +8,14 @@ on:
         required: true
         type: choice
         options:
+          - build-windows
           - build
 permissions:
   contents: write
 jobs:
   check-and-build:
-    if: inputs.job == 'build'
+    if: inputs.job == 'build' || inputs.job == 'build-windows'
     uses: ./.github/workflows/build-project.yaml
+    with:
+      windows_only: ${{ inputs.job == 'build-windows' }}
     secrets: inherit
