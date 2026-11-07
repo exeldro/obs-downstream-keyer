@@ -442,6 +442,16 @@ void DownstreamKeyer::Save(obs_data_t *data)
 	}
 	obs_data_set_array(data, "exclude_scenes", excludes);
 	obs_data_array_release(excludes);
+	auto loads = obs_data_array_create();
+	for (const auto &l : load_scenes) {
+		const auto obj = obs_data_create();
+		obs_data_set_string(obj, "program_scene", l.first.c_str());
+		obs_data_set_string(obj, "dsk_scene", l.second.c_str());
+		obs_data_array_push_back(loads, obj);
+		obs_data_release(obj);
+	}
+	obs_data_set_array(data, "load_scenes", loads);
+	obs_data_array_release(loads);
 }
 
 std::string DownstreamKeyer::GetTransition(enum transitionType transition_type)
@@ -585,7 +595,22 @@ void DownstreamKeyer::SceneChanged(std::string scene)
 	if (found) {
 		apply_source(nullptr);
 		return;
-	} else {
+	}
+
+	const auto load = load_scenes.find(scene);
+	if (load != load_scenes.end()) {
+		const auto items = scenesList->findItems(QT_UTF8(load->second.c_str()), Qt::MatchFixedString);
+		if (!items.isEmpty()) {
+			scenesList->blockSignals(true);
+			scenesList->setCurrentItem(items.first());
+			items.first()->setSelected(true);
+			scenesList->blockSignals(false);
+			apply_selected_source();
+			return;
+		}
+	}
+
+	{
 		obs_source_t *prevSource = view     ? obs_view_get_source(view, outputChannel)
 					   : canvas ? obs_canvas_get_channel(canvas, outputChannel)
 						    : obs_get_output_source(outputChannel);
@@ -690,6 +715,21 @@ void DownstreamKeyer::Load(obs_data_t *data)
 			obs_data_release(sceneData);
 		}
 		obs_data_array_release(excludes);
+	}
+
+	auto loads = obs_data_get_array(data, "load_scenes");
+	load_scenes.clear();
+	if (loads) {
+		auto count = obs_data_array_count(loads);
+		for (size_t i = 0; i < count; i++) {
+			const auto sceneData = obs_data_array_item(loads, i);
+			const char *program_scene = obs_data_get_string(sceneData, "program_scene");
+			const char *dsk_scene = obs_data_get_string(sceneData, "dsk_scene");
+			if (program_scene && *program_scene && dsk_scene && *dsk_scene)
+				load_scenes[program_scene] = dsk_scene;
+			obs_data_release(sceneData);
+		}
+		obs_data_array_release(loads);
 	}
 }
 
@@ -893,6 +933,34 @@ void DownstreamKeyer::RemoveExcludeScene(const char *scene_name)
 bool DownstreamKeyer::IsSceneExcluded(const char *scene_name)
 {
 	return exclude_scenes.find(scene_name) != exclude_scenes.end();
+}
+
+void DownstreamKeyer::SetLoadScene(const char *program_scene_name, const char *dsk_scene_name)
+{
+	if (!program_scene_name || !*program_scene_name)
+		return;
+	if (!dsk_scene_name || !*dsk_scene_name) {
+		load_scenes.erase(program_scene_name);
+		return;
+	}
+	load_scenes[program_scene_name] = dsk_scene_name;
+}
+
+std::string DownstreamKeyer::GetLoadScene(const char *program_scene_name)
+{
+	const auto it = load_scenes.find(program_scene_name);
+	return it == load_scenes.end() ? "" : it->second;
+}
+
+QStringList DownstreamKeyer::GetScenes()
+{
+	QStringList scenes;
+	for (int i = 0; i < scenesList->count(); i++) {
+		const auto item = scenesList->item(i);
+		if (item)
+			scenes.append(item->text());
+	}
+	return scenes;
 }
 
 QString DownstreamKeyer::GetScene()

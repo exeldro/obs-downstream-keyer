@@ -8,6 +8,7 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QWidget>
+#include <map>
 #include <set>
 
 #include "obs.h"
@@ -46,6 +47,8 @@ private:
 	obs_hotkey_id null_hotkey_id;
 	obs_hotkey_pair_id tie_hotkey_id;
 	std::set<std::string> exclude_scenes;
+	// program scene name -> keyer scene name to load when that program scene goes live
+	std::map<std::string, std::string> load_scenes;
 	obs_view_t *view = nullptr;
 	obs_canvas_t *canvas = nullptr;
 	get_transitions_callback_t get_transitions = nullptr;
@@ -91,6 +94,9 @@ public:
 	void AddExcludeScene(const char *scene_name);
 	void RemoveExcludeScene(const char *scene_name);
 	bool IsSceneExcluded(const char *scene_name);
+	void SetLoadScene(const char *program_scene_name, const char *dsk_scene_name);
+	std::string GetLoadScene(const char *program_scene_name);
+	QStringList GetScenes();
 	QString GetScene();
 	bool SwitchToScene(QString scene_name);
 	void add_scene(QString scene_name, obs_source_t *s, int insertBeforeRow);
