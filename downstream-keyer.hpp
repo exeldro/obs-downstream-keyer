@@ -8,7 +8,6 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QWidget>
-#include <map>
 #include <set>
 
 #include "obs.h"
@@ -48,9 +47,8 @@ private:
 	obs_hotkey_pair_id tie_hotkey_id;
 	std::set<std::string> exclude_scenes;
 	// program scene name -> keyer scene name to load when that program scene goes live
-	std::map<std::string, std::string> load_scenes;
-	// keyer scene loaded by load_scenes, unloaded again when leaving the mapped program scene
-	std::string autoLoadedScene;
+	// when non-empty, the keyer output is only on while one of these program scenes is live
+	std::set<std::string> load_scenes;
 	obs_view_t *view = nullptr;
 	obs_canvas_t *canvas = nullptr;
 	get_transitions_callback_t get_transitions = nullptr;
@@ -67,6 +65,7 @@ private:
 	static bool disable_tie_hotkey(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed);
 
 	void ChangeSceneIndex(bool relative, int idx, int invalidIdx);
+	std::string GetProgramSceneName();
 
 private slots:
 	void on_actionAddScene_triggered();
@@ -96,9 +95,9 @@ public:
 	void AddExcludeScene(const char *scene_name);
 	void RemoveExcludeScene(const char *scene_name);
 	bool IsSceneExcluded(const char *scene_name);
-	void SetLoadScene(const char *program_scene_name, const char *dsk_scene_name);
-	std::string GetLoadScene(const char *program_scene_name);
-	QStringList GetScenes();
+	void AddLoadScene(const char *scene_name);
+	void RemoveLoadScene(const char *scene_name);
+	bool IsLoadScene(const char *scene_name);
 	QString GetScene();
 	bool SwitchToScene(QString scene_name);
 	void add_scene(QString scene_name, obs_source_t *s, int insertBeforeRow);

@@ -445,8 +445,7 @@ void DownstreamKeyer::Save(obs_data_t *data)
 	auto loads = obs_data_array_create();
 	for (const auto &l : load_scenes) {
 		const auto obj = obs_data_create();
-		obs_data_set_string(obj, "program_scene", l.first.c_str());
-		obs_data_set_string(obj, "dsk_scene", l.second.c_str());
+		obs_data_set_string(obj, "name", l.c_str());
 		obs_data_array_push_back(loads, obj);
 		obs_data_release(obj);
 	}
@@ -592,39 +591,15 @@ void DownstreamKeyer::SceneChanged(std::string scene)
 			found = true;
 	}
 
+	// With Load On Scene set, any program scene not in that list is treated like an excluded scene.
+	// The selected keyer scene is kept, so it comes back on the next listed scene.
+	if (!load_scenes.empty() && load_scenes.find(scene) == load_scenes.end())
+		found = true;
+
 	if (found) {
 		apply_source(nullptr);
 		return;
-	}
-
-	const auto load = load_scenes.find(scene);
-	if (load != load_scenes.end()) {
-		const auto items = scenesList->findItems(QT_UTF8(load->second.c_str()), Qt::MatchFixedString);
-		if (!items.isEmpty()) {
-			scenesList->blockSignals(true);
-			scenesList->setCurrentItem(items.first());
-			items.first()->setSelected(true);
-			scenesList->blockSignals(false);
-			apply_selected_source();
-			autoLoadedScene = load->second;
-			return;
-		}
-	}
-
-	if (!autoLoadedScene.empty()) {
-		// Leaving a mapped scene: unload what we loaded, unless the user picked something else since.
-		const bool stillShowing = GetScene() == QT_UTF8(autoLoadedScene.c_str());
-		autoLoadedScene.clear();
-		if (stillShowing) {
-			scenesList->blockSignals(true);
-			on_actionSceneNull_triggered();
-			scenesList->blockSignals(false);
-			apply_source(nullptr);
-			return;
-		}
-	}
-
-	{
+	} else {
 		obs_source_t *prevSource = view     ? obs_view_get_source(view, outputChannel)
 					   : canvas ? obs_canvas_get_channel(canvas, outputChannel)
 						    : obs_get_output_source(outputChannel);
@@ -737,10 +712,11 @@ void DownstreamKeyer::Load(obs_data_t *data)
 		auto count = obs_data_array_count(loads);
 		for (size_t i = 0; i < count; i++) {
 			const auto sceneData = obs_data_array_item(loads, i);
-			const char *program_scene = obs_data_get_string(sceneData, "program_scene");
-			const char *dsk_scene = obs_data_get_string(sceneData, "dsk_scene");
-			if (program_scene && *program_scene && dsk_scene && *dsk_scene)
-				load_scenes[program_scene] = dsk_scene;
+			const char *name = obs_data_get_string(sceneData, "name");
+			if (!name || !*name) // settings saved by the earlier per-scene mapping version
+				name = obs_data_get_string(sceneData, "program_scene");
+			if (name && *name)
+				load_scenes.emplace(name);
 			obs_data_release(sceneData);
 		}
 		obs_data_array_release(loads);
@@ -949,32 +925,48 @@ bool DownstreamKeyer::IsSceneExcluded(const char *scene_name)
 	return exclude_scenes.find(scene_name) != exclude_scenes.end();
 }
 
-void DownstreamKeyer::SetLoadScene(const char *program_scene_name, const char *dsk_scene_name)
+std::string DownstreamKeyer::GetProgramSceneName()
 {
-	if (!program_scene_name || !*program_scene_name)
-		return;
-	if (!dsk_scene_name || !*dsk_scene_name) {
-		load_scenes.erase(program_scene_name);
-		return;
+	obs_source_t *scene = nullptr;
+	if (view || canvas) {
+		obs_source_t *source = view ? obs_view_get_source(view, 0) : obs_canvas_get_channel(canvas, 0);
+		while (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+			obs_source_t *ts = obs_transition_get_active_source(source);
+			if (!ts)
+				break;
+			obs_source_release(source);
+			source = ts;
+		}
+		if (source && obs_source_is_scene(source))
+			scene = source;
+		else
+			obs_source_release(source);
+	} else {
+		scene = obs_frontend_get_current_scene();
 	}
-	load_scenes[program_scene_name] = dsk_scene_name;
+	std::string name = scene ? obs_source_get_name(scene) : "";
+	obs_source_release(scene);
+	return name;
 }
 
-std::string DownstreamKeyer::GetLoadScene(const char *program_scene_name)
+void DownstreamKeyer::AddLoadScene(const char *scene_name)
 {
-	const auto it = load_scenes.find(program_scene_name);
-	return it == load_scenes.end() ? "" : it->second;
+	if (!scene_name || !*scene_name || !load_scenes.emplace(scene_name).second)
+		return;
+	// the list affects every scene (not just this one), so always re-evaluate
+	SceneChanged(GetProgramSceneName());
 }
 
-QStringList DownstreamKeyer::GetScenes()
+void DownstreamKeyer::RemoveLoadScene(const char *scene_name)
 {
-	QStringList scenes;
-	for (int i = 0; i < scenesList->count(); i++) {
-		const auto item = scenesList->item(i);
-		if (item)
-			scenes.append(item->text());
-	}
-	return scenes;
+	if (!scene_name || !load_scenes.erase(scene_name))
+		return;
+	SceneChanged(GetProgramSceneName());
+}
+
+bool DownstreamKeyer::IsLoadScene(const char *scene_name)
+{
+	return load_scenes.find(scene_name) != load_scenes.end();
 }
 
 QString DownstreamKeyer::GetScene()
