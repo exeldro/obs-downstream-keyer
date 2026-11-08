@@ -1,6 +1,6 @@
 # Load On Scene
 
-**Load On Scene** is a per-keyer option that limits a downstream keyer's output to a chosen set of program scenes. When a listed scene goes live in Program, the keyer loads automatically. On any other program scene, the keyer output is off.
+**Load On Scene** is a per-keyer option that limits a downstream keyer's output to a chosen set of program scenes. When a listed scene goes live in Program, the keyer loads automatically. On any other program scene, the keyer output is off unless manually selected to activate as was already the case.
 
 It is the opposite of **Exclude Scene**:
 
