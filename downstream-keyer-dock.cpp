@@ -286,6 +286,8 @@ void obs_module_post_load(void)
 	obs_websocket_vendor_register_request(vendor, "dsk_add_exclude_scene", DownstreamKeyerDock::add_exclude_scene, nullptr);
 	obs_websocket_vendor_register_request(vendor, "dsk_remove_exclude_scene", DownstreamKeyerDock::remove_exclude_scene,
 					      nullptr);
+	obs_websocket_vendor_register_request(vendor, "dsk_add_load_scene", DownstreamKeyerDock::add_load_scene, nullptr);
+	obs_websocket_vendor_register_request(vendor, "dsk_remove_load_scene", DownstreamKeyerDock::remove_load_scene, nullptr);
 }
 
 void obs_module_unload()
@@ -308,6 +310,8 @@ void obs_module_unload()
 	obs_websocket_vendor_unregister_request(vendor, "dsk_set_transition");
 	obs_websocket_vendor_unregister_request(vendor, "dsk_add_exclude_scene");
 	obs_websocket_vendor_unregister_request(vendor, "dsk_remove_exclude_scene");
+	obs_websocket_vendor_unregister_request(vendor, "dsk_add_load_scene");
+	obs_websocket_vendor_unregister_request(vendor, "dsk_remove_load_scene");
 }
 
 MODULE_EXPORT const char *obs_module_description(void)
@@ -671,6 +675,35 @@ void DownstreamKeyerDock::AddExcludeSceneMenu(QMenu *tm)
 	obs_frontend_source_list_free(&scenes);
 }
 
+void DownstreamKeyerDock::AddLoadSceneMenu(QMenu *tm)
+{
+	const auto w = dynamic_cast<DownstreamKeyer *>(tabs->currentWidget());
+	if (!w)
+		return;
+
+	auto setLoadScene = [this](std::string name, bool add) {
+		const auto w = dynamic_cast<DownstreamKeyer *>(tabs->currentWidget());
+		if (!w)
+			return;
+		if (add)
+			w->AddLoadScene(name.c_str());
+		else
+			w->RemoveLoadScene(name.c_str());
+	};
+
+	struct obs_frontend_source_list scenes = {};
+	obs_frontend_get_scenes(&scenes);
+	for (size_t i = 0; i < scenes.sources.num; i++) {
+		const std::string name = obs_source_get_name(scenes.sources.array[i]);
+		const bool checked = w->IsLoadScene(name.c_str());
+		auto a = tm->addAction(QT_UTF8(name.c_str()));
+		a->setCheckable(true);
+		a->setChecked(checked);
+		connect(a, &QAction::triggered, [setLoadScene, name, checked] { setLoadScene(name, !checked); });
+	}
+	obs_frontend_source_list_free(&scenes);
+}
+
 void DownstreamKeyerDock::ConfigClicked()
 {
 	QMenu popup;
@@ -688,6 +721,8 @@ void DownstreamKeyerDock::ConfigClicked()
 	AddTransitionMenu(tm, transitionType::hide);
 	tm = popup.addMenu(QT_UTF8(obs_module_text("ExcludeScene")));
 	AddExcludeSceneMenu(tm);
+	tm = popup.addMenu(QT_UTF8(obs_module_text("LoadOnScene")));
+	AddLoadSceneMenu(tm);
 
 	tm = popup.addMenu(QT_UTF8(obs_module_text("HideAfter")));
 	QSpinBox *duration = new QSpinBox(tm);
@@ -857,6 +892,22 @@ bool DownstreamKeyerDock::RemoveExcludeScene(QString dskName, const char *sceneN
 		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
 		if (w->objectName() == dskName) {
 			w->RemoveExcludeScene(sceneName);
+			return true;
+		}
+	}
+	return false;
+}
+
+bool DownstreamKeyerDock::SetLoadScene(QString dskName, const char *sceneName, bool add)
+{
+	const int count = tabs->count();
+	for (int i = 0; i < count; i++) {
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
+		if (w->objectName() == dskName) {
+			if (add)
+				w->AddLoadScene(sceneName);
+			else
+				w->RemoveLoadScene(sceneName);
 			return true;
 		}
 	}
@@ -1168,6 +1219,42 @@ void DownstreamKeyerDock::remove_exclude_scene(obs_data_t *request_data, obs_dat
 		return;
 	}
 	obs_data_set_bool(response_data, "success", dsk->RemoveExcludeScene(QString::fromUtf8(dsk_name), scene_name));
+}
+
+void DownstreamKeyerDock::add_load_scene(obs_data_t *request_data, obs_data_t *response_data, void *param)
+{
+	UNUSED_PARAMETER(param);
+	load_scene_request(request_data, response_data, true);
+}
+
+void DownstreamKeyerDock::remove_load_scene(obs_data_t *request_data, obs_data_t *response_data, void *param)
+{
+	UNUSED_PARAMETER(param);
+	load_scene_request(request_data, response_data, false);
+}
+
+void DownstreamKeyerDock::load_scene_request(obs_data_t *request_data, obs_data_t *response_data, bool add)
+{
+	const char *viewName = obs_data_get_string(request_data, "view_name");
+	if (_dsks.find(viewName) == _dsks.end()) {
+		obs_data_set_string(response_data, "error", "'view_name' not found");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	auto dsk = _dsks[viewName];
+	const char *dsk_name = obs_data_get_string(request_data, "dsk_name");
+	const char *scene_name = obs_data_get_string(request_data, "scene");
+	if (!scene_name || !strlen(scene_name)) {
+		obs_data_set_string(response_data, "error", "'scene' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	if (!dsk_name || !strlen(dsk_name)) {
+		obs_data_set_string(response_data, "error", "'dsk_name' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	obs_data_set_bool(response_data, "success", dsk->SetLoadScene(QString::fromUtf8(dsk_name), scene_name, add));
 }
 
 void DownstreamKeyerDock::remove_canvas(void *data, calldata_t *cd)

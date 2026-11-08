@@ -46,6 +46,11 @@ private:
 	obs_hotkey_id null_hotkey_id;
 	obs_hotkey_pair_id tie_hotkey_id;
 	std::set<std::string> exclude_scenes;
+	// program scene names the keyer output is shown on (Load On Scene)
+	// when non-empty, the keyer output is only on while one of these program scenes is live
+	std::set<std::string> load_scenes;
+	// last keyer scene that was selected, loaded again when a Load On Scene program scene goes live
+	QString lastSelectedScene;
 	obs_view_t *view = nullptr;
 	obs_canvas_t *canvas = nullptr;
 	get_transitions_callback_t get_transitions = nullptr;
@@ -62,6 +67,7 @@ private:
 	static bool disable_tie_hotkey(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed);
 
 	void ChangeSceneIndex(bool relative, int idx, int invalidIdx);
+	std::string GetProgramSceneName();
 
 private slots:
 	void on_actionAddScene_triggered();
@@ -91,6 +97,9 @@ public:
 	void AddExcludeScene(const char *scene_name);
 	void RemoveExcludeScene(const char *scene_name);
 	bool IsSceneExcluded(const char *scene_name);
+	void AddLoadScene(const char *scene_name);
+	void RemoveLoadScene(const char *scene_name);
+	bool IsLoadScene(const char *scene_name);
 	QString GetScene();
 	bool SwitchToScene(QString scene_name);
 	void add_scene(QString scene_name, obs_source_t *s, int insertBeforeRow);
