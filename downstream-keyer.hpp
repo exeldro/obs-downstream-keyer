@@ -49,6 +49,8 @@ private:
 	// program scene names the keyer output is shown on (Load On Scene)
 	// when non-empty, the keyer output is only on while one of these program scenes is live
 	std::set<std::string> load_scenes;
+	// last keyer scene that was selected, loaded again when a Load On Scene program scene goes live
+	QString lastSelectedScene;
 	obs_view_t *view = nullptr;
 	obs_canvas_t *canvas = nullptr;
 	get_transitions_callback_t get_transitions = nullptr;

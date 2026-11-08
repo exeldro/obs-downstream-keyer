@@ -375,6 +375,10 @@ void DownstreamKeyer::apply_selected_source()
 
 void DownstreamKeyer::on_scenesList_itemSelectionChanged()
 {
+	const auto selected = scenesList->selectedItems();
+	if (!selected.isEmpty())
+		lastSelectedScene = selected.first()->text();
+
 	if (tie->isChecked())
 		return;
 
@@ -599,7 +603,27 @@ void DownstreamKeyer::SceneChanged(std::string scene)
 	if (found) {
 		apply_source(nullptr);
 		return;
-	} else {
+	}
+
+	// A listed program scene went live: if the keyer has nothing selected (it was cleared, or Hide After ran),
+	// load its last used keyer scene, or the first one in its list.
+	if (!load_scenes.empty() && scenesList->selectedItems().isEmpty() && scenesList->count() > 0) {
+		QListWidgetItem *item = nullptr;
+		if (!lastSelectedScene.isEmpty()) {
+			const auto matches = scenesList->findItems(lastSelectedScene, Qt::MatchFixedString);
+			if (!matches.isEmpty())
+				item = matches.first();
+		}
+		if (!item)
+			item = scenesList->item(0);
+		// apply below, the same way for tie and non-tie keyers
+		const QSignalBlocker blocker(scenesList);
+		scenesList->setCurrentItem(item);
+		item->setSelected(true);
+		lastSelectedScene = item->text();
+	}
+
+	{
 		obs_source_t *prevSource = view     ? obs_view_get_source(view, outputChannel)
 					   : canvas ? obs_canvas_get_channel(canvas, outputChannel)
 						    : obs_get_output_source(outputChannel);
