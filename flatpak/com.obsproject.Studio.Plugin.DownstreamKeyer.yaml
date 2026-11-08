@@ -1,0 +1,22 @@
+# Builds this fork as the Flatpak OBS Downstream Keyer extension.
+# Same as Flathub's manifest (github.com/flathub/com.obsproject.Studio.Plugin.DownstreamKeyer),
+# but built from harmanmj/obs-downstream-keyer's load-on-scene branch, without the metainfo file.
+id: com.obsproject.Studio.Plugin.DownstreamKeyer
+branch: stable
+runtime: com.obsproject.Studio
+runtime-version: stable
+sdk: org.kde.Sdk//6.6
+build-extension: true
+separate-locales: false
+build-options:
+  prefix: /app/plugins/DownstreamKeyer
+modules:
+  - name: downstream-keyer
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_OUT_OF_TREE=On
+    sources:
+      - type: git
+        url: https://github.com/harmanmj/obs-downstream-keyer.git
+        branch: load-on-scene
