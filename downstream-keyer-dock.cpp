@@ -786,7 +786,6 @@ void DownstreamKeyerDock::ConfigClicked()
 		});
 	}
 
-
 	tm = popup.addMenu(QT_UTF8(obs_module_text("HideAfter")));
 	QSpinBox *duration = new QSpinBox(tm);
 	duration->setMinimum(0);
