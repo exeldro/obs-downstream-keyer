@@ -86,6 +86,17 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_c
 	column->setContentsMargins(4, 4, 4, 4);
 	column->setSpacing(4);
 
+	auto addTitle = [&](const char *text) {
+		auto title = new QLabel(QT_UTF8(obs_module_text(text)), sideColumn);
+		title->setAlignment(Qt::AlignCenter);
+		QFont font = title->font();
+		font.setBold(true);
+		title->setFont(font);
+		column->addWidget(title);
+	};
+
+	addTitle("KeyerActionTitle");
+
 	goLiveButton = new QPushButton(QT_UTF8(obs_module_text("GoLive")), sideColumn);
 	goLiveButton->setObjectName(QStringLiteral("dskGoLive"));
 	connect(goLiveButton, &QPushButton::clicked, this, &DownstreamKeyer::GoLive);
@@ -104,12 +115,7 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_c
 
 	column->addSpacing(8);
 
-	auto sceneChangeTitle = new QLabel(QT_UTF8(obs_module_text("SceneChangeTitle")).replace("\\n", "\n"), sideColumn);
-	sceneChangeTitle->setAlignment(Qt::AlignCenter);
-	QFont titleFont = sceneChangeTitle->font();
-	titleFont.setBold(true);
-	sceneChangeTitle->setFont(titleFont);
-	column->addWidget(sceneChangeTitle);
+	addTitle("SceneChangeTitle");
 
 	// at most one of these is on; with neither on the live scenes stay live on a scene change
 	auto addModeButton = [&](const char *text, int mode) {
@@ -122,6 +128,11 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_c
 	};
 	changeOnButton = addModeButton("SceneChangeOn", sceneChangeOn);
 	changeOffButton = addModeButton("SceneChangeOff", sceneChangeOff);
+
+	auto sceneChangeNote = new QLabel(QT_UTF8(obs_module_text("SceneChangeNote")), sideColumn);
+	sceneChangeNote->setAlignment(Qt::AlignCenter);
+	sceneChangeNote->setWordWrap(true);
+	column->addWidget(sceneChangeNote);
 
 	column->addStretch();
 	row->addWidget(sideColumn);
