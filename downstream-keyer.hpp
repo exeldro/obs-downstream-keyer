@@ -18,14 +18,6 @@
 
 typedef void (*get_transitions_callback_t)(void *data, struct obs_frontend_source_list *sources);
 
-class LockedCheckBox : public QCheckBox {
-	Q_OBJECT
-
-public:
-	LockedCheckBox();
-	explicit LockedCheckBox(QWidget *parent);
-};
-
 enum transitionType { match, show, hide, override };
 
 // What the dock's All Keyers buttons mean for a program scene change
@@ -150,7 +142,6 @@ private slots:
 	void on_actionRemoveScene_triggered();
 	void on_actionSceneUp_triggered();
 	void on_actionSceneDown_triggered();
-	void on_actionSceneNull_triggered();
 	void apply_source(obs_source_t *newSource, bool useTransition = true);
 	void apply_live_source();
 

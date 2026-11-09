@@ -342,11 +342,6 @@ void DownstreamKeyer::on_actionSceneDown_triggered()
 	ChangeSceneIndex(true, 1, scenesList->count() - 1);
 }
 
-void DownstreamKeyer::on_actionSceneNull_triggered()
-{
-	KeyerOff();
-}
-
 void DownstreamKeyer::KeyerOff()
 {
 	// only the output goes off: the checked scenes and any preview stay
@@ -1793,11 +1788,3 @@ void DownstreamKeyer::UpdateButtons()
 	previewButton->setChecked(previewing);
 	previewButton->setStyleSheet(ready ? "background-color: #1b5e20; color: white; font-weight: bold;" : "");
 }
-
-LockedCheckBox::LockedCheckBox()
-{
-	setProperty("lockCheckBox", true);
-	setProperty("class", "indicator-lock");
-}
-
-LockedCheckBox::LockedCheckBox(QWidget *parent) : QCheckBox(parent) {}
