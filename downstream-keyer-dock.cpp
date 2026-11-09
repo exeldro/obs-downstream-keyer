@@ -10,6 +10,7 @@
 #include <QMainWindow>
 #include <QPainter>
 #include <QPixmap>
+#include <QTabBar>
 #include <QMenu>
 #include <QPushButton>
 #include <QThread>
@@ -33,6 +34,48 @@ MODULE_EXTERN struct obs_source_info output_source_info;
 
 std::map<std::string, DownstreamKeyerDock *> _dsks;
 obs_websocket_vendor vendor = nullptr;
+
+// Tab bar that fills a tab with its tally colour (tab data): red on program, green on the studio mode preview
+class TallyTabBar : public QTabBar {
+public:
+	using QTabBar::QTabBar;
+
+protected:
+	void paintEvent(QPaintEvent *event) override
+	{
+		QTabBar::paintEvent(event);
+		QPainter painter(this);
+		painter.setRenderHint(QPainter::Antialiasing);
+		for (int i = 0; i < count(); i++) {
+			QColor tally = tabData(i).value<QColor>();
+			// the selected tab is gray when it is neither on program nor on the preview
+			if (!tally.isValid() && i == currentIndex())
+				tally = QColor(85, 85, 85);
+			if (!tally.isValid())
+				continue;
+			const QRect rect = tabRect(i).adjusted(1, 1, -1, -1);
+			painter.setPen(Qt::NoPen);
+			painter.setBrush(tally);
+			painter.drawRoundedRect(rect, 3, 3);
+			if (i == currentIndex()) {
+				// keep the selected tab recognisable
+				painter.setBrush(QColor(255, 255, 255, 200));
+				painter.drawRect(QRect(rect.left() + 3, rect.bottom() - 2, rect.width() - 6, 3));
+			}
+			QFont font = painter.font();
+			font.setBold(true);
+			painter.setFont(font);
+			painter.setPen(Qt::white);
+			painter.drawText(rect, Qt::AlignCenter,
+					 QFontMetrics(font).elidedText(tabText(i), Qt::ElideRight, rect.width() - 8));
+		}
+	}
+};
+
+class TallyTabWidget : public QTabWidget {
+public:
+	explicit TallyTabWidget(QWidget *parent) : QTabWidget(parent) { setTabBar(new TallyTabBar(this)); }
+};
 
 extern "C" {
 size_t get_view_count();
@@ -384,6 +427,7 @@ void DownstreamKeyerDock::frontend_event(enum obs_frontend_event event, void *da
 		downstreamKeyerDock->UpdateTabTally();
 	} else if (event == OBS_FRONTEND_EVENT_STUDIO_MODE_ENABLED || event == OBS_FRONTEND_EVENT_STUDIO_MODE_DISABLED) {
 		downstreamKeyerDock->ForEachKeyer([](DownstreamKeyer *w) { w->StudioModeChanged(); });
+		downstreamKeyerDock->UpdateAllKeyersButtons();
 		downstreamKeyerDock->UpdateTabTally();
 	} else if (event == OBS_FRONTEND_EVENT_SCRIPTING_SHUTDOWN) {
 		downstreamKeyerDock->closing = true;
@@ -412,7 +456,7 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v,
 		signal_handler_connect(sh, "remove", remove_canvas, this);
 	}
 
-	tabs = new QTabWidget(this);
+	tabs = new TallyTabWidget(this);
 	tabs->setMovable(true);
 
 	connect(tabs->tabBar(), &QTabBar::tabMoved, tabs->tabBar(), [this]() {
@@ -437,7 +481,7 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v,
 	titleFont.setBold(true);
 	allKeyersTitle->setFont(titleFont);
 
-	auto keyerOffButton = new QPushButton(QT_UTF8(obs_module_text("KeyerOff")), this);
+	auto keyerOffButton = new QPushButton(QT_UTF8(obs_module_text("AllKeyersOff")), this);
 	connect(keyerOffButton, &QPushButton::clicked, this, &DownstreamKeyerDock::AllKeyersOff);
 
 	offAtSceneChangeButton = new QPushButton(QT_UTF8(obs_module_text("SceneChangeOff")), this);
@@ -456,6 +500,11 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v,
 	allKeyersRow->addWidget(keyerOffButton);
 	allKeyersRow->addWidget(offAtSceneChangeButton);
 	allKeyersRow->addWidget(holdKeyersButton);
+
+	transitionKeyersButton = new QPushButton(QT_UTF8(obs_module_text("TransitionKeyers")), this);
+	transitionKeyersButton->setToolTip(QT_UTF8(obs_module_text("TransitionKeyersTip")));
+	connect(transitionKeyersButton, &QPushButton::clicked, this, &DownstreamKeyerDock::TransitionKeyers);
+	allKeyersRow->addWidget(transitionKeyersButton);
 
 	auto l = new QVBoxLayout;
 	l->setContentsMargins(0, 0, 0, 0);
@@ -521,45 +570,27 @@ void DownstreamKeyerDock::ProgramTransitionStarting(obs_source_t *dest)
 
 void DownstreamKeyerDock::RefreshPreviewOverlays(bool force)
 {
-	bool anyCue = false;
-	ForEachKeyer([&anyCue, force](DownstreamKeyer *w) {
-		w->UpdatePreviewOverlay(force);
-		anyCue = anyCue || w->IsPreviewing();
-	});
-	ForEachKeyer([anyCue](DownstreamKeyer *w) { w->SetTransitionKeyersEnabled(anyCue); });
+	ForEachKeyer([force](DownstreamKeyer *w) { w->UpdatePreviewOverlay(force); });
 	UpdateTabTally();
 }
 
-static QIcon tally_icon(const QColor &color)
-{
-	QPixmap pixmap(12, 12);
-	pixmap.fill(Qt::transparent);
-	QPainter painter(&pixmap);
-	painter.setRenderHint(QPainter::Antialiasing);
-	painter.setPen(Qt::NoPen);
-	painter.setBrush(color);
-	painter.drawEllipse(1, 1, 10, 10);
-	return QIcon(pixmap);
-}
-
-// tab tally dot: red while the keyer is on program, green while it shows on the studio mode preview
+// tab tally: the tab is filled red while the keyer is on program, green while it shows on the studio mode preview
 void DownstreamKeyerDock::UpdateTabTally()
 {
 	if (closing)
 		return;
-	static const QIcon live = tally_icon(QColor(230, 60, 60));
-	static const QIcon preview = tally_icon(QColor(70, 190, 100));
 	for (int i = 0; i < tabs->count(); i++) {
 		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
 		if (!w)
 			continue;
+		QVariant tally;
 		if (w->IsLiveOnOutput())
-			tabs->setTabIcon(i, live);
+			tally = QColor(198, 40, 40);
 		else if (w->IsOnPreview())
-			tabs->setTabIcon(i, preview);
-		else
-			tabs->setTabIcon(i, QIcon());
+			tally = QColor(46, 125, 50);
+		tabs->tabBar()->setTabData(i, tally);
 	}
+	tabs->tabBar()->update();
 }
 
 SceneChangeContext DownstreamKeyerDock::GetSceneChangeContext(const std::string &scene, bool forPreview)
@@ -580,26 +611,7 @@ void DownstreamKeyerDock::SetupKeyer(DownstreamKeyer *keyer)
 	keyer->SetContextProvider([this](const std::string &scene,
 					 bool forPreview) { return GetSceneChangeContext(scene, forPreview); },
 				  [this]() { RefreshPreviewOverlays(false); });
-	keyer->SetTransitionKeyers([this]() { TransitionKeyers(); });
 	keyer->SetHeld(holdKeyers);
-}
-
-// Transition Keyers: take every cued keyer live without a scene transition. The other keyers follow the same rule
-// as when a cue is taken with a scene change, for the current program scene.
-void DownstreamKeyerDock::TransitionKeyers()
-{
-	std::vector<DownstreamKeyer *> cued, others;
-	ForEachKeyer([&](DownstreamKeyer *w) { (w->IsPreviewing() ? cued : others).push_back(w); });
-	if (cued.empty())
-		return;
-	for (auto w : cued)
-		w->GoLive();
-	if (holdKeyers)
-		return;
-	// the rest keep only the Load On Scene keyers of the program scene (loading them if needed)
-	const auto scene = ProgramSceneName();
-	for (auto w : others)
-		w->SyncToProgramScene(scene);
 }
 
 void DownstreamKeyerDock::AllKeyersOff()
@@ -634,6 +646,31 @@ void DownstreamKeyerDock::UpdateAllKeyersButtons()
 	holdKeyersButton->setChecked(holdKeyers);
 	// Hold Keyers overrides Keyer Off at Scene Change
 	offAtSceneChangeButton->setEnabled(!holdKeyers);
+	// the main output only: studio mode does not apply to views and canvases
+	transitionKeyersButton->setVisible(!view && !canvas && obs_frontend_preview_program_mode_active());
+}
+
+void DownstreamKeyerDock::TransitionKeyers()
+{
+	if (view || canvas || !obs_frontend_preview_program_mode_active())
+		return;
+	obs_source_t *previewScene = obs_frontend_get_current_preview_scene();
+	const std::string scene = previewScene ? obs_source_get_name(previewScene) : "";
+	obs_source_release(previewScene);
+	if (scene.empty())
+		return;
+	// work out every keyer's next look first, taking cues changes the context for the others
+	const auto ctx = GetSceneChangeContext(scene, true);
+	std::vector<std::pair<DownstreamKeyer *, QStringList>> next;
+	ForEachKeyer([&](DownstreamKeyer *w) { next.emplace_back(w, w->PredictedScenes(scene, ctx)); });
+	for (auto &[w, scenes] : next) {
+		if (w->IsPreviewing())
+			w->GoLive(); // the cue goes live and is cleared
+		else if (scenes.isEmpty())
+			w->KeyerOff();
+		else
+			w->TakeLive(scenes);
+	}
 }
 
 DownstreamKeyerDock::~DownstreamKeyerDock()
@@ -857,7 +894,9 @@ void DownstreamKeyerDock::AddTransitionMenu(QMenu *tm, enum transitionType trans
 		}
 	};
 
-	auto a = tm->addAction(QT_UTF8(obs_module_text("None")));
+	// no transition of its own: the main Transition follows the OBS scene transition, Show / Hide follow Transition
+	auto a = tm->addAction(
+		QT_UTF8(obs_module_text(transition_type == transitionType::match ? "SameAsSceneTransition" : "SameAsTransition")));
 	a->setCheckable(true);
 	a->setChecked(transition.empty());
 	connect(a, &QAction::triggered, [setTransition] { return setTransition(""); });

@@ -58,6 +58,9 @@ private:
 	obs_source_t *showTransition;
 	obs_source_t *hideTransition;
 	obs_source_t *overrideTransition;
+	// used when the keyer has no Transition of its own: a private copy of the OBS scene transition
+	obs_source_t *defaultTransition = nullptr;
+	obs_source_t *DefaultTransition(uint32_t &duration, obs_source_t **retired);
 	QListWidget *scenesList;
 	QToolBar *scenesToolbar;
 	// side column
@@ -65,8 +68,7 @@ private:
 	QPushButton *goLiveButton;
 	QPushButton *previewButton;
 	QPushButton *transitionKeyersButton;
-	// set by the dock: take every cued keyer live without a scene transition
-	std::function<void()> transitionKeyers;
+	QPushButton *keyerOffButton;
 	uint32_t transitionDuration;
 	uint32_t showTransitionDuration;
 	uint32_t hideTransitionDuration;
@@ -136,7 +138,6 @@ private:
 	void set_output(obs_source_t *source);
 	void UpdateTally();
 	void UpdateButtons();
-	QStringList PredictedScenes(const std::string &scene, const SceneChangeContext &ctx);
 	SceneChangeContext GetContext(const std::string &scene, bool forPreview);
 	// Load On Scene: the scenes loaded when a listed scene goes live and nothing is live
 	QStringList AutoLoadScenes();
@@ -183,9 +184,6 @@ public:
 		contextProvider = std::move(provider);
 		stateChanged = std::move(changed);
 	}
-	void SetTransitionKeyers(std::function<void()> callback) { transitionKeyers = std::move(callback); }
-	// enabled while any keyer in the dock is cued
-	void SetTransitionKeyersEnabled(bool enabled);
 	void SetHeld(bool on)
 	{
 		held = on;
@@ -212,6 +210,10 @@ public:
 	// tally: on the program output right now, and shown on the studio mode preview scene
 	bool IsLiveOnOutput();
 	bool IsOnPreview() { return overlayTarget != nullptr; }
+	// what this keyer shows after a program transition to scene
+	QStringList PredictedScenes(const std::string &scene, const SceneChangeContext &ctx);
+	// put these keyer scenes on the output now (with the keyer transition)
+	void TakeLive(const QStringList &scenes) { SetLiveScenes(InListOrder(scenes)); }
 	bool ArmScene(const QString &scene_name);
 	void StudioModeChanged();
 	// transitionEnded: called when the program transition finished, so it is not checked for still running

@@ -29,6 +29,7 @@ private:
 	bool offAtSceneChangeUsed = false;
 	QPushButton *offAtSceneChangeButton = nullptr;
 	QPushButton *holdKeyersButton = nullptr;
+	QPushButton *transitionKeyersButton = nullptr;
 
 	void Save(obs_data_t *data);
 	void Load(obs_data_t *data);
@@ -62,6 +63,7 @@ private:
 	std::string ProgramSceneName();
 	void SetupKeyer(DownstreamKeyer *keyer);
 	void AllKeyersOff();
+	// Transition Keyers (studio mode): the program keyers become what the preview shows, without a scene transition
 	void TransitionKeyers();
 	void SetOffAtSceneChange(bool on);
 	void SetHoldKeyers(bool on);

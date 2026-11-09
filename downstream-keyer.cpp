@@ -110,15 +110,20 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_c
 	connect(previewButton, &QPushButton::clicked, this, &DownstreamKeyer::TogglePreview);
 	column->addWidget(previewButton);
 
-	transitionKeyersButton = new QPushButton(QT_UTF8(obs_module_text("TransitionKeyers")), sideColumn);
-	transitionKeyersButton->setObjectName(QStringLiteral("dskTransitionKeyers"));
-	transitionKeyersButton->setToolTip(QT_UTF8(obs_module_text("TransitionKeyersTip")));
+	transitionKeyersButton = new QPushButton(QT_UTF8(obs_module_text("TransitionKeyer")), sideColumn);
+	transitionKeyersButton->setObjectName(QStringLiteral("dskTransitionKeyer"));
+	transitionKeyersButton->setToolTip(QT_UTF8(obs_module_text("TransitionKeyerTip")));
 	transitionKeyersButton->setEnabled(false);
-	connect(transitionKeyersButton, &QPushButton::clicked, this, [this]() {
-		if (transitionKeyers)
-			transitionKeyers();
-	});
+	// Go to Program: this keyer's cue, or else its checked scenes, go live without a scene transition and
+	// without touching other keyers (the same as Go Live)
+	connect(transitionKeyersButton, &QPushButton::clicked, this, &DownstreamKeyer::GoLive);
 	column->addWidget(transitionKeyersButton);
+
+	keyerOffButton = new QPushButton(QT_UTF8(obs_module_text("KeyerOff")), sideColumn);
+	keyerOffButton->setObjectName(QStringLiteral("dskKeyerOff"));
+	keyerOffButton->setToolTip(QT_UTF8(obs_module_text("KeyerOffTip")));
+	connect(keyerOffButton, &QPushButton::clicked, this, &DownstreamKeyer::KeyerOff);
+	column->addWidget(keyerOffButton);
 
 	column->addStretch();
 	row->addWidget(sideColumn);
@@ -247,6 +252,11 @@ DownstreamKeyer::~DownstreamKeyer()
 		obs_source_release(overrideTransition);
 		overrideTransition = nullptr;
 	}
+	if (defaultTransition) {
+		obs_transition_clear(defaultTransition);
+		obs_source_release(defaultTransition);
+		defaultTransition = nullptr;
+	}
 	const auto sh = obs_get_signal_handler();
 	signal_handler_disconnect(sh, "source_rename", source_rename, this);
 	signal_handler_disconnect(sh, "source_remove", source_remove, this);
@@ -368,6 +378,7 @@ void DownstreamKeyer::set_output(obs_source_t *source)
 
 void DownstreamKeyer::apply_source(obs_source_t *const newSource, bool useTransition)
 {
+	obs_source_t *retiredTransition = nullptr; // an older copy of the scene transition, released at the end
 	if (newSource && hideAfter > 0 && !held) {
 		hideTimer.stop();
 		hideTimer.setInterval(hideAfter);
@@ -406,8 +417,12 @@ void DownstreamKeyer::apply_source(obs_source_t *const newSource, bool useTransi
 		if (overrideTransition) {
 			newTransition = overrideTransition;
 			newTransitionDuration = overrideTransitionDuration;
-		} else if (transition)
+		} else if (transition) {
 			newTransition = transition;
+		} else {
+			// no keyer Transition set: follow the OBS scene transition and its duration
+			newTransition = DefaultTransition(newTransitionDuration, &retiredTransition);
+		}
 	}
 	if (!useTransition)
 		newTransition = nullptr;
@@ -438,6 +453,36 @@ void DownstreamKeyer::apply_source(obs_source_t *const newSource, bool useTransi
 
 	obs_source_release(prevSource);
 	obs_source_release(prevTransition);
+	if (retiredTransition) {
+		obs_transition_clear(retiredTransition);
+		obs_source_release(retiredTransition);
+	}
+}
+
+// The OBS scene transition (Scene Transitions dock) as a private copy for this keyer's output, kept in step with
+// it: a new copy when another transition is picked, the settings copied over otherwise. An older copy that may still
+// be on the output is handed back in retired, to release once the output uses the new one.
+obs_source_t *DownstreamKeyer::DefaultTransition(uint32_t &duration, obs_source_t **retired)
+{
+	obs_source_t *current = obs_frontend_get_current_transition();
+	if (!current)
+		return defaultTransition;
+	const char *name = obs_source_get_name(current);
+	if (!defaultTransition || strcmp(obs_source_get_id(defaultTransition), obs_source_get_id(current)) != 0 ||
+	    strcmp(obs_source_get_name(defaultTransition), name ? name : "") != 0) {
+		obs_source_t *copy = obs_source_duplicate(current, name, true);
+		if (copy) {
+			*retired = defaultTransition;
+			defaultTransition = copy;
+		}
+	} else {
+		obs_data_t *settings = obs_source_get_settings(current);
+		obs_source_update(defaultTransition, settings);
+		obs_data_release(settings);
+	}
+	obs_source_release(current);
+	duration = (uint32_t)obs_frontend_get_transition_duration();
+	return defaultTransition;
 }
 
 void DownstreamKeyer::apply_live_source()
@@ -1333,7 +1378,7 @@ void DownstreamKeyer::SetOutputChannel(int oc)
 	}
 	if (prevTransition) {
 		if (prevTransition == transition || prevTransition == showTransition || prevTransition == hideTransition ||
-		    prevTransition == overrideTransition) {
+		    prevTransition == overrideTransition || prevTransition == defaultTransition) {
 			set_output(nullptr);
 		} else {
 			obs_source_release(prevTransition);
@@ -1711,17 +1756,18 @@ void DownstreamKeyer::UpdateTally()
 		UpdatePreviewOverlay();
 }
 
-void DownstreamKeyer::SetTransitionKeyersEnabled(bool enabled)
-{
-	transitionKeyersButton->setEnabled(enabled);
-	transitionKeyersButton->setStyleSheet(enabled ? "background-color: #1b5e20; color: white; font-weight: bold;" : "");
-}
-
 void DownstreamKeyer::UpdateButtons()
 {
 	const bool studio = PreviewSupported() && obs_frontend_preview_program_mode_active();
+	// Studio Mode: Go to Preview then Go to Program. Otherwise Go Live.
+	goLiveButton->setVisible(!studio);
 	previewButton->setVisible(studio);
 	transitionKeyersButton->setVisible(studio);
+	// Go to Preview and Go to Program light up while this keyer has scenes checked (or a cue to take)
+	const bool ready = IsPreviewing() || !CheckedScenes().isEmpty();
+	transitionKeyersButton->setEnabled(ready);
+	previewButton->setEnabled(ready);
+	transitionKeyersButton->setStyleSheet(ready ? "background-color: #b71c1c; color: white; font-weight: bold;" : "");
 
 	const bool previewing = IsPreviewing();
 	const auto armed = previewing ? previewScenes : CheckedScenes();
@@ -1729,7 +1775,7 @@ void DownstreamKeyer::UpdateButtons()
 	const bool goLiveArmed = !armed.isEmpty() && armed != liveScenes;
 	goLiveButton->setStyleSheet(goLiveArmed ? "background-color: #b71c1c; color: white; font-weight: bold;" : "");
 	previewButton->setChecked(previewing);
-	previewButton->setStyleSheet(previewing ? "background-color: #1b5e20; color: white; font-weight: bold;" : "");
+	previewButton->setStyleSheet(ready ? "background-color: #1b5e20; color: white; font-weight: bold;" : "");
 }
 
 LockedCheckBox::LockedCheckBox()
