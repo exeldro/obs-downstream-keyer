@@ -18,10 +18,10 @@ It is the opposite of **Exclude Scene**:
 Notes on how it behaves:
 
 - **An empty list turns the feature off.** If no scenes are checked, the keyer behaves exactly as before and is shown on every program scene (except excluded ones).
-- **The keyer loads by itself.** When a listed scene goes live and the keyer has nothing selected (it was cleared, or **Hide After** ran), it selects and shows the keyer scene it last used. If none has been used since OBS started, it uses the first scene in its list. If a keyer scene is already selected, that one is shown.
-- **The keyer's selection is kept off-list.** When you switch to a program scene that isn't in the list, the keyer output is cleared, but its selection in the dock stays the same. The output comes back as soon as a listed scene goes live again.
+- **The keyer loads by itself.** When a listed scene goes live and nothing is live on the keyer (it was turned off, or **Hide After** ran), it shows the keyer scenes that were last live. If none have been live since OBS started, it uses the first scene in its list. If keyer scenes are already live, those are shown.
+- **The live scenes are kept off-list.** When you switch to a program scene that isn't in the list, the keyer output is cleared, but the keyer remembers what was live. The output comes back as soon as a listed scene goes live again.
 - **Hide After still applies.** A keyer with **Hide After** set shows for that long each time a listed scene goes live, then clears itself.
-- **Manual changes win.** Clicking a keyer scene in the dock shows it immediately, even when the program scene isn't in the list. Load On Scene only acts when the program scene changes.
+- **Manual changes win.** **Go Live** shows the checked keyer scenes immediately, even when the program scene isn't in the list. Load On Scene only acts when the program scene changes. See [README-Go-Live.md](README-Go-Live.md) for Go Live and the other keyer controls.
 - **Exclude Scene wins.** If a scene is both excluded and in the Load On Scene list, the keyer output is hidden on that scene.
 - **Changes apply right away.** Adding or removing a scene re-checks the scene that is currently in Program, so you don't need to switch scenes to see the effect.
 - **Each keyer has its own list.** This includes keyers on extra views or canvases. For those, "program scene" means the scene that is active on that view or canvas, looking through any transition in progress.
