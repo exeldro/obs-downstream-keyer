@@ -402,6 +402,9 @@ void DownstreamKeyerDock::frontend_event(enum obs_frontend_event event, void *da
 		if (!downstreamKeyerDock->closing) {
 			downstreamKeyerDock->AddDefaultKeyer();
 		}
+	} else if (event == OBS_FRONTEND_EVENT_TRANSITION_LIST_CHANGED || event == OBS_FRONTEND_EVENT_FINISHED_LOADING) {
+		if (!downstreamKeyerDock->view && !downstreamKeyerDock->canvas)
+			downstreamKeyerDock->HookTransitions();
 	} else if (event == OBS_FRONTEND_EVENT_EXIT) {
 		downstreamKeyerDock->ClearKeyers();
 	} else if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED || event == OBS_FRONTEND_EVENT_TRANSITION_STOPPED) {
@@ -521,7 +524,33 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v,
 	obs_frontend_add_save_callback(frontend_save_load, this);
 	obs_frontend_add_event_callback(frontend_event, this);
 	if (!view && !canvas)
-		signal_handler_connect(obs_get_signal_handler(), "source_transition_start", transition_start, this);
+		HookTransitions();
+}
+
+void DownstreamKeyerDock::UnhookTransitions()
+{
+	for (auto weak : hookedTransitions) {
+		obs_source_t *tr = obs_weak_source_get_source(weak);
+		if (tr)
+			signal_handler_disconnect(obs_source_get_signal_handler(tr), "transition_start", transition_start, this);
+		obs_source_release(tr);
+		obs_weak_source_release(weak);
+	}
+	hookedTransitions.clear();
+}
+
+// (re)connect to every OBS scene transition, they are private so the global source_transition_start does not fire
+void DownstreamKeyerDock::HookTransitions()
+{
+	UnhookTransitions();
+	obs_frontend_source_list transitions = {};
+	obs_frontend_get_transitions(&transitions);
+	for (size_t i = 0; i < transitions.sources.num; i++) {
+		obs_source_t *tr = transitions.sources.array[i];
+		signal_handler_connect(obs_source_get_signal_handler(tr), "transition_start", transition_start, this);
+		hookedTransitions.push_back(obs_source_get_weak_source(tr));
+	}
+	obs_frontend_source_list_free(&transitions);
 }
 
 // The main program transition started: the keyers change with it instead of after it.
@@ -681,7 +710,7 @@ DownstreamKeyerDock::~DownstreamKeyerDock()
 	obs_frontend_remove_save_callback(frontend_save_load, this);
 	obs_frontend_remove_event_callback(frontend_event, this);
 	if (!view && !canvas)
-		signal_handler_disconnect(obs_get_signal_handler(), "source_transition_start", transition_start, this);
+		UnhookTransitions();
 	ClearKeyers();
 	auto c = obs_weak_canvas_get_canvas(canvas);
 	if (c) {

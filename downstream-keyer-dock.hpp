@@ -4,6 +4,7 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <QFrame>
+#include <vector>
 #include <QPushButton>
 #include <obs-frontend-api.h>
 #include "downstream-keyer.hpp"
@@ -55,6 +56,10 @@ private:
 	// program scene whose transition start was already handled, so the end of it is skipped
 	std::string transitionStartedScene;
 	static void transition_start(void *data, calldata_t *cd);
+	// the OBS scene transitions are private sources, so their own transition_start signals are connected
+	std::vector<obs_weak_source_t *> hookedTransitions;
+	void HookTransitions();
+	void UnhookTransitions();
 	void ProgramTransitionStarting(obs_source_t *dest);
 	bool KeyerAction(QString dskName, QString sceneName, bool preview);
 	static void keyer_action_request(obs_data_t *request_data, obs_data_t *response_data, bool preview);
