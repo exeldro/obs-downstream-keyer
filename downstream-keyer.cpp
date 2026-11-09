@@ -1,6 +1,5 @@
 #include "downstream-keyer.hpp"
 
-#include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QHBoxLayout>
@@ -105,19 +104,24 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_c
 
 	column->addSpacing(8);
 
-	auto sceneChangeGroup = new QButtonGroup(sideColumn);
-	sceneChangeGroup->setExclusive(true);
+	auto sceneChangeTitle = new QLabel(QT_UTF8(obs_module_text("SceneChangeTitle")).replace("\\n", "\n"), sideColumn);
+	sceneChangeTitle->setAlignment(Qt::AlignCenter);
+	QFont titleFont = sceneChangeTitle->font();
+	titleFont.setBold(true);
+	sceneChangeTitle->setFont(titleFont);
+	column->addWidget(sceneChangeTitle);
+
+	// at most one of these is on; with neither on the live scenes stay live on a scene change
 	auto addModeButton = [&](const char *text, int mode) {
 		auto b = new QPushButton(QT_UTF8(obs_module_text(text)).replace("\\n", "\n"), sideColumn);
 		b->setCheckable(true);
-		sceneChangeGroup->addButton(b, mode);
 		column->addWidget(b);
-		connect(b, &QPushButton::clicked, this, [this, mode]() { SetSceneChangeMode(mode); });
+		connect(b, &QPushButton::clicked, this,
+			[this, mode](bool checked) { SetSceneChangeMode(checked ? mode : sceneChangeNone); });
 		return b;
 	};
 	changeOnButton = addModeButton("SceneChangeOn", sceneChangeOn);
 	changeOffButton = addModeButton("SceneChangeOff", sceneChangeOff);
-	changeNoneButton = addModeButton("SceneChangeNone", sceneChangeNone);
 
 	column->addStretch();
 	row->addWidget(sideColumn);
@@ -1545,7 +1549,6 @@ void DownstreamKeyer::UpdateButtons()
 
 	changeOnButton->setChecked(sceneChangeMode == sceneChangeOn);
 	changeOffButton->setChecked(sceneChangeMode == sceneChangeOff);
-	changeNoneButton->setChecked(sceneChangeMode == sceneChangeNone);
 }
 
 LockedCheckBox::LockedCheckBox()

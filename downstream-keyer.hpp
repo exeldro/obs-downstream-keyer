@@ -29,9 +29,9 @@ enum transitionType { match, show, hide, override };
 
 // what the keyer does when the program scene transitions
 enum sceneChangeMode {
-	sceneChangeNone = 0, // No Transition on Scene Change: the live scenes stay live
-	sceneChangeOn = 1,   // Transition On with Scene Change: the checked scenes go live with the transition
-	sceneChangeOff = 2,  // Transition Off on Scene Change: the keyer goes off with the transition
+	sceneChangeNone = 0, // neither button on: the live scenes stay live
+	sceneChangeOn = 1,   // Go Live at Scene Change: the checked scenes go live with the transition
+	sceneChangeOff = 2,  // Keyer Off at Scene Change: the keyer goes off with the transition
 };
 
 // Remove the scene items Go to Preview added to a scene. owner nullptr removes them for every keyer.
@@ -58,7 +58,6 @@ private:
 	QPushButton *keyerOffButton;
 	QPushButton *changeOnButton;
 	QPushButton *changeOffButton;
-	QPushButton *changeNoneButton;
 	uint32_t transitionDuration;
 	uint32_t showTransitionDuration;
 	uint32_t hideTransitionDuration;
