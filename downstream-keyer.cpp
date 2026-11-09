@@ -1037,10 +1037,9 @@ void DownstreamKeyer::source_rename(void *data, calldata_t *calldata)
 		if (item->text() == prevName)
 			item->setText(newName);
 	}
-	downstreamKeyer->liveScenes.replaceInStrings(QRegularExpression("^" + QRegularExpression::escape(prevName) + "$"),
-						     newName);
-	downstreamKeyer->lastLiveScenes.replaceInStrings(
-		QRegularExpression("^" + QRegularExpression::escape(prevName) + "$"), newName);
+	downstreamKeyer->liveScenes.replaceInStrings(QRegularExpression("^" + QRegularExpression::escape(prevName) + "$"), newName);
+	downstreamKeyer->lastLiveScenes.replaceInStrings(QRegularExpression("^" + QRegularExpression::escape(prevName) + "$"),
+							 newName);
 	downstreamKeyer->previewScenes.replaceInStrings(QRegularExpression("^" + QRegularExpression::escape(prevName) + "$"),
 							newName);
 	downstreamKeyer->checkedCache = downstreamKeyer->CheckedScenes();
@@ -1068,8 +1067,7 @@ void DownstreamKeyer::source_remove(void *data, calldata_t *calldata)
 	downstreamKeyer->lastLiveScenes.removeAll(name);
 	if (downstreamKeyer->liveScenes.removeAll(name) && downstreamKeyer->liveScenes.isEmpty())
 		QMetaObject::invokeMethod(downstreamKeyer, "KeyerOff", Qt::QueuedConnection);
-	QMetaObject::invokeMethod(downstreamKeyer, [downstreamKeyer]() { downstreamKeyer->ScenesChecked(); },
-				  Qt::QueuedConnection);
+	QMetaObject::invokeMethod(downstreamKeyer, [downstreamKeyer]() { downstreamKeyer->ScenesChecked(); }, Qt::QueuedConnection);
 }
 
 // scene hotkeys put a scene on or off the output right away, next to the other live scenes
@@ -1097,8 +1095,8 @@ bool DownstreamKeyer::enable_DSK_hotkey(void *data, obs_hotkey_pair_id id, obs_h
 	if (!pressed)
 		return false;
 	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
-	QMetaObject::invokeMethod(downstreamKeyer, [downstreamKeyer, id]() { downstreamKeyer->SetSceneHotkey(id, true); },
-				  Qt::QueuedConnection);
+	QMetaObject::invokeMethod(
+		downstreamKeyer, [downstreamKeyer, id]() { downstreamKeyer->SetSceneHotkey(id, true); }, Qt::QueuedConnection);
 	return true;
 }
 
@@ -1108,8 +1106,8 @@ bool DownstreamKeyer::disable_DSK_hotkey(void *data, obs_hotkey_pair_id id, obs_
 	if (!pressed)
 		return false;
 	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
-	QMetaObject::invokeMethod(downstreamKeyer, [downstreamKeyer, id]() { downstreamKeyer->SetSceneHotkey(id, false); },
-				  Qt::QueuedConnection);
+	QMetaObject::invokeMethod(
+		downstreamKeyer, [downstreamKeyer, id]() { downstreamKeyer->SetSceneHotkey(id, false); }, Qt::QueuedConnection);
 	return true;
 }
 
@@ -1133,8 +1131,7 @@ bool DownstreamKeyer::enable_tie_hotkey(void *data, obs_hotkey_pair_id id, obs_h
 	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
 	if (downstreamKeyer->sceneChangeMode == sceneChangeOn)
 		return false;
-	QMetaObject::invokeMethod(downstreamKeyer, [downstreamKeyer]() { downstreamKeyer->SetTie(true); },
-				  Qt::QueuedConnection);
+	QMetaObject::invokeMethod(downstreamKeyer, [downstreamKeyer]() { downstreamKeyer->SetTie(true); }, Qt::QueuedConnection);
 	return true;
 }
 bool DownstreamKeyer::disable_tie_hotkey(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed)
@@ -1146,8 +1143,7 @@ bool DownstreamKeyer::disable_tie_hotkey(void *data, obs_hotkey_pair_id id, obs_
 	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
 	if (downstreamKeyer->sceneChangeMode != sceneChangeOn)
 		return false;
-	QMetaObject::invokeMethod(downstreamKeyer, [downstreamKeyer]() { downstreamKeyer->SetTie(false); },
-				  Qt::QueuedConnection);
+	QMetaObject::invokeMethod(downstreamKeyer, [downstreamKeyer]() { downstreamKeyer->SetTie(false); }, Qt::QueuedConnection);
 	return true;
 }
 
