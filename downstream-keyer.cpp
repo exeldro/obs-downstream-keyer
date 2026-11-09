@@ -497,24 +497,122 @@ QStringList DownstreamKeyer::InListOrder(const QStringList &scenes)
 	return ordered;
 }
 
+// ---- video only wrapper: shows its child, but has no audio, so the child's audio is not mixed ----
+
+#define VIDEO_ONLY_ID "downstream_keyer_video_only"
+
+struct video_only_data {
+	obs_source_t *child;
+};
+
+static const char *video_only_get_name(void *)
+{
+	return "Downstream Keyer Video Only";
+}
+
+static void *video_only_create(obs_data_t *, obs_source_t *)
+{
+	return new video_only_data{nullptr};
+}
+
+static void video_only_destroy(void *data)
+{
+	auto d = static_cast<video_only_data *>(data);
+	obs_source_release(d->child);
+	delete d;
+}
+
+static void video_only_render(void *data, gs_effect_t *)
+{
+	auto d = static_cast<video_only_data *>(data);
+	if (d->child)
+		obs_source_video_render(d->child);
+}
+
+static uint32_t video_only_width(void *data)
+{
+	auto d = static_cast<video_only_data *>(data);
+	return d->child ? obs_source_get_width(d->child) : 0;
+}
+
+static uint32_t video_only_height(void *data)
+{
+	auto d = static_cast<video_only_data *>(data);
+	return d->child ? obs_source_get_height(d->child) : 0;
+}
+
+static void video_only_enum_sources(void *data, obs_source_enum_proc_t enum_callback, void *param)
+{
+	auto d = static_cast<video_only_data *>(data);
+	if (d->child)
+		enum_callback(static_cast<obs_source_t *>(nullptr), d->child, param);
+}
+
+void dsk_register_video_only_source()
+{
+	static obs_source_info info = {};
+	info.id = VIDEO_ONLY_ID;
+	info.type = OBS_SOURCE_TYPE_INPUT;
+	info.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_CUSTOM_DRAW | OBS_SOURCE_CAP_DISABLED;
+	info.get_name = video_only_get_name;
+	info.create = video_only_create;
+	info.destroy = video_only_destroy;
+	info.video_render = video_only_render;
+	info.get_width = video_only_width;
+	info.get_height = video_only_height;
+	info.enum_active_sources = video_only_enum_sources;
+	info.enum_all_sources = video_only_enum_sources;
+	obs_register_source(&info);
+}
+
 // One scene: that scene. Several: a private scene with them layered, the top of the list on top.
+// Without Include Audio it is wrapped in a video only source.
 obs_source_t *DownstreamKeyer::BuildSetSource(const QStringList &scenes)
 {
 	if (scenes.isEmpty())
 		return nullptr;
-	if (scenes.size() == 1)
-		return GetSourceByName(scenes.first());
 	QString name = QT_UTF8(obs_module_text("DownstreamKeyer"));
 	name += " ";
 	name += objectName();
-	obs_scene_t *scene = obs_scene_create_private(QT_TO_UTF8(name));
-	for (auto it = scenes.crbegin(); it != scenes.crend(); ++it) {
-		obs_source_t *child = GetSourceByName(*it);
-		if (child)
-			obs_scene_add(scene, child);
-		obs_source_release(child);
+	obs_source_t *source = nullptr;
+	if (scenes.size() == 1) {
+		source = GetSourceByName(scenes.first());
+	} else {
+		obs_scene_t *scene = obs_scene_create_private(QT_TO_UTF8(name));
+		for (auto it = scenes.crbegin(); it != scenes.crend(); ++it) {
+			obs_source_t *child = GetSourceByName(*it);
+			if (child)
+				obs_scene_add(scene, child);
+			obs_source_release(child);
+		}
+		source = obs_scene_get_source(scene);
 	}
-	return obs_scene_get_source(scene);
+	if (!source || includeAudio)
+		return source;
+	obs_source_t *wrapper = obs_source_create_private(VIDEO_ONLY_ID, QT_TO_UTF8(name), nullptr);
+	if (!wrapper)
+		return source;
+	static_cast<video_only_data *>(obs_obj_get_data(wrapper))->child = source; // takes the reference
+	return wrapper;
+}
+
+void DownstreamKeyer::SetIncludeAudio(bool include)
+{
+	if (includeAudio == include)
+		return;
+	includeAudio = include;
+	// rebuild what is on the output and in preview; the picture stays the same, so no transition
+	if (liveSource) {
+		obs_source_t *newSource = BuildSetSource(liveScenes);
+		obs_source_release(liveSource);
+		liveSource = newSource;
+		apply_source(liveSource, false);
+	}
+	if (IsPreviewing()) {
+		obs_source_release(previewSource);
+		previewSource = BuildSetSource(previewScenes);
+		AttachPreview();
+	}
 }
 
 // Make scenes the live scenes and put them on the output. source, when set, is the ready made source for them.
@@ -585,6 +683,7 @@ void DownstreamKeyer::Save(obs_data_t *data)
 	obs_data_set_int(data, "hide_after", hideAfter);
 	obs_data_set_bool(data, "tie", sceneChangeMode == sceneChangeOn);
 	obs_data_set_int(data, "scene_change_mode", sceneChangeMode);
+	obs_data_set_bool(data, "include_audio", includeAudio);
 	obs_data_array_t *sceneArray = obs_data_array_create();
 	for (int i = 0; i < scenesList->count(); i++) {
 		auto item = scenesList->item(i);
@@ -813,6 +912,7 @@ void DownstreamKeyer::Load(obs_data_t *data)
 		sceneChangeMode = (int)obs_data_get_int(data, "scene_change_mode");
 	else
 		sceneChangeMode = obs_data_get_bool(data, "tie") ? sceneChangeOn : sceneChangeNone;
+	includeAudio = obs_data_get_bool(data, "include_audio");
 
 	// live scenes: this version saves a list, earlier versions the one scene that was on the output
 	QStringList live;

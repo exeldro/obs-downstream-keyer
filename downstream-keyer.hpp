@@ -34,6 +34,9 @@ enum sceneChangeMode {
 	sceneChangeOff = 2,  // Keyer Off at Scene Change: the keyer goes off with the transition
 };
 
+// Registers the private video only source used to leave keyer audio out of the mix.
+void dsk_register_video_only_source();
+
 // Remove the scene items Go to Preview added to a scene. owner nullptr removes them for every keyer.
 void dsk_remove_preview_items(obs_source_t *scene_source, const char *owner);
 // Remove leftover Go to Preview scene items from all scenes (for example after a crash while previewing).
@@ -64,6 +67,8 @@ private:
 	uint32_t overrideTransitionDuration = 300;
 	uint32_t hideAfter = 0;
 	int sceneChangeMode = sceneChangeNone;
+	// mix the audio of the keyer scenes into the output (off by default: video only)
+	bool includeAudio = false;
 	obs_hotkey_id null_hotkey_id;
 	obs_hotkey_pair_id tie_hotkey_id;
 	obs_hotkey_id go_live_hotkey_id;
@@ -168,6 +173,8 @@ public:
 	bool RemoveScene(QString scene_name);
 	void SetTie(bool tie);
 	void SetSceneChangeMode(int mode);
+	void SetIncludeAudio(bool include);
+	bool GetIncludeAudio() { return includeAudio; }
 	void SetOutputChannel(int outputChannel);
 	bool IsPreviewing() { return !previewScenes.isEmpty(); }
 	bool ArmScene(const QString &scene_name);

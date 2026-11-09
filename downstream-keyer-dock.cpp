@@ -249,6 +249,7 @@ bool obs_module_load()
 {
 	blog(LOG_INFO, "[Downstream Keyer] loaded version %s", PROJECT_VERSION);
 	obs_register_source(&output_source_info);
+	dsk_register_video_only_source();
 
 	const auto main_window = static_cast<QMainWindow *>(obs_frontend_get_main_window());
 	obs_frontend_push_ui_translation(obs_module_get_string);
@@ -773,6 +774,17 @@ void DownstreamKeyerDock::ConfigClicked()
 	AddExcludeSceneMenu(tm);
 	tm = popup.addMenu(QT_UTF8(obs_module_text("LoadOnScene")));
 	AddLoadSceneMenu(tm);
+
+	if (const auto keyer = dynamic_cast<DownstreamKeyer *>(tabs->currentWidget())) {
+		a = popup.addAction(QT_UTF8(obs_module_text("IncludeAudio")));
+		a->setCheckable(true);
+		const bool included = keyer->GetIncludeAudio();
+		a->setChecked(included);
+		connect(a, &QAction::triggered, [this, included] {
+			if (auto w = dynamic_cast<DownstreamKeyer *>(tabs->currentWidget()))
+				w->SetIncludeAudio(!included);
+		});
+	}
 
 
 	tm = popup.addMenu(QT_UTF8(obs_module_text("HideAfter")));
