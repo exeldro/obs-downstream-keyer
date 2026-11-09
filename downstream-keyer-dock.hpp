@@ -61,7 +61,7 @@ private:
 	void HookTransitions();
 	void UnhookTransitions();
 	void ProgramTransitionStarting(obs_source_t *dest);
-	bool KeyerAction(QString dskName, QString sceneName, bool preview);
+	bool KeyerAction(QString dskName, QStringList scenes, bool preview, const char **error);
 	static void keyer_action_request(obs_data_t *request_data, obs_data_t *response_data, bool preview);
 
 	SceneChangeContext GetSceneChangeContext(const std::string &scene, bool forPreview);
@@ -118,5 +118,9 @@ public:
 	static void remove_load_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void go_live(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void go_to_preview(obs_data_t *request_data, obs_data_t *response_data, void *param);
+	static void all_keyers_off(obs_data_t *request_data, obs_data_t *response_data, void *param);
+	static void set_hold_keyers(obs_data_t *request_data, obs_data_t *response_data, void *param);
+	static void set_keyer_off_at_scene_change(obs_data_t *request_data, obs_data_t *response_data, void *param);
+	static void transition_keyers(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void remove_canvas(void *data, calldata_t *cd);
 };

@@ -345,6 +345,11 @@ void obs_module_post_load(void)
 	obs_websocket_vendor_register_request(vendor, "dsk_remove_load_scene", DownstreamKeyerDock::remove_load_scene, nullptr);
 	obs_websocket_vendor_register_request(vendor, "dsk_go_live", DownstreamKeyerDock::go_live, nullptr);
 	obs_websocket_vendor_register_request(vendor, "dsk_go_to_preview", DownstreamKeyerDock::go_to_preview, nullptr);
+	obs_websocket_vendor_register_request(vendor, "dsk_all_keyers_off", DownstreamKeyerDock::all_keyers_off, nullptr);
+	obs_websocket_vendor_register_request(vendor, "dsk_set_hold_keyers", DownstreamKeyerDock::set_hold_keyers, nullptr);
+	obs_websocket_vendor_register_request(vendor, "dsk_set_keyer_off_at_scene_change",
+					      DownstreamKeyerDock::set_keyer_off_at_scene_change, nullptr);
+	obs_websocket_vendor_register_request(vendor, "dsk_transition_keyers", DownstreamKeyerDock::transition_keyers, nullptr);
 }
 
 void obs_module_unload()
@@ -371,6 +376,10 @@ void obs_module_unload()
 	obs_websocket_vendor_unregister_request(vendor, "dsk_remove_load_scene");
 	obs_websocket_vendor_unregister_request(vendor, "dsk_go_live");
 	obs_websocket_vendor_unregister_request(vendor, "dsk_go_to_preview");
+	obs_websocket_vendor_unregister_request(vendor, "dsk_all_keyers_off");
+	obs_websocket_vendor_unregister_request(vendor, "dsk_set_hold_keyers");
+	obs_websocket_vendor_unregister_request(vendor, "dsk_set_keyer_off_at_scene_change");
+	obs_websocket_vendor_unregister_request(vendor, "dsk_transition_keyers");
 }
 
 MODULE_EXPORT const char *obs_module_description(void)
@@ -1564,17 +1573,22 @@ void DownstreamKeyerDock::load_scene_request(obs_data_t *request_data, obs_data_
 	obs_data_set_bool(response_data, "success", dsk->SetLoadScene(QString::fromUtf8(dsk_name), scene_name, add));
 }
 
-bool DownstreamKeyerDock::KeyerAction(QString dskName, QString sceneName, bool preview)
+// websocket dsk_go_live / dsk_go_to_preview; scenes (when not empty) are checked first
+bool DownstreamKeyerDock::KeyerAction(QString dskName, QStringList scenes, bool preview, const char **error)
 {
 	const int count = tabs->count();
 	for (int i = 0; i < count; i++) {
 		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
 		if (!w || w->objectName() != dskName)
 			continue;
+		if (!w->HasScenes(scenes)) {
+			*error = "a scene is not in the downstream keyer";
+			return false;
+		}
 		QMetaObject::invokeMethod(
 			w,
-			[w, sceneName, preview]() {
-				if (!w->ArmScene(sceneName))
+			[w, scenes, preview]() {
+				if (!scenes.isEmpty() && !w->ArmScenes(scenes))
 					return;
 				if (!preview)
 					w->GoLive();
@@ -1584,28 +1598,56 @@ bool DownstreamKeyerDock::KeyerAction(QString dskName, QString sceneName, bool p
 			Qt::QueuedConnection);
 		return true;
 	}
+	*error = "No downstream keyer with that name found";
 	return false;
 }
 
-void DownstreamKeyerDock::keyer_action_request(obs_data_t *request_data, obs_data_t *response_data, bool preview)
+// the dock for the view_name of a request, or nullptr with the error set in the response
+static DownstreamKeyerDock *request_dock(obs_data_t *request_data, obs_data_t *response_data)
 {
 	const char *viewName = obs_data_get_string(request_data, "view_name");
 	if (_dsks.find(viewName) == _dsks.end()) {
 		obs_data_set_string(response_data, "error", "'view_name' not found");
 		obs_data_set_bool(response_data, "success", false);
-		return;
+		return nullptr;
 	}
-	auto dsk = _dsks[viewName];
+	return _dsks[viewName];
+}
+
+void DownstreamKeyerDock::keyer_action_request(obs_data_t *request_data, obs_data_t *response_data, bool preview)
+{
+	auto dsk = request_dock(request_data, response_data);
+	if (!dsk)
+		return;
 	const char *dsk_name = obs_data_get_string(request_data, "dsk_name");
 	if (!dsk_name || !strlen(dsk_name)) {
 		obs_data_set_string(response_data, "error", "'dsk_name' not set");
 		obs_data_set_bool(response_data, "success", false);
 		return;
 	}
-	// optional: arm this scene first
-	const char *scene_name = obs_data_get_string(request_data, "scene");
-	obs_data_set_bool(response_data, "success",
-			  dsk->KeyerAction(QString::fromUtf8(dsk_name), QString::fromUtf8(scene_name ? scene_name : ""), preview));
+	// optional: check these scenes first, from "scenes" (an array of { "name": ... }) or "scene"
+	QStringList scenes;
+	obs_data_array_t *array = obs_data_get_array(request_data, "scenes");
+	if (array) {
+		const size_t count = obs_data_array_count(array);
+		for (size_t i = 0; i < count; i++) {
+			obs_data_t *item = obs_data_array_item(array, i);
+			const char *name = obs_data_get_string(item, "name");
+			if (name && *name)
+				scenes.append(QString::fromUtf8(name));
+			obs_data_release(item);
+		}
+		obs_data_array_release(array);
+	} else {
+		const char *scene_name = obs_data_get_string(request_data, "scene");
+		if (scene_name && *scene_name)
+			scenes.append(QString::fromUtf8(scene_name));
+	}
+	const char *error = nullptr;
+	const bool success = dsk->KeyerAction(QString::fromUtf8(dsk_name), scenes, preview, &error);
+	if (!success && error)
+		obs_data_set_string(response_data, "error", error);
+	obs_data_set_bool(response_data, "success", success);
 }
 
 void DownstreamKeyerDock::go_live(obs_data_t *request_data, obs_data_t *response_data, void *param)
@@ -1618,6 +1660,67 @@ void DownstreamKeyerDock::go_to_preview(obs_data_t *request_data, obs_data_t *re
 {
 	UNUSED_PARAMETER(param);
 	keyer_action_request(request_data, response_data, true);
+}
+
+// websocket dsk_all_keyers_off: All Keyers Off
+void DownstreamKeyerDock::all_keyers_off(obs_data_t *request_data, obs_data_t *response_data, void *param)
+{
+	UNUSED_PARAMETER(param);
+	auto dsk = request_dock(request_data, response_data);
+	if (!dsk)
+		return;
+	QMetaObject::invokeMethod(dsk, [dsk]() { dsk->AllKeyersOff(); }, Qt::QueuedConnection);
+	obs_data_set_bool(response_data, "success", true);
+}
+
+// websocket dsk_set_hold_keyers: Hold Keyers on (hold: true) or off
+void DownstreamKeyerDock::set_hold_keyers(obs_data_t *request_data, obs_data_t *response_data, void *param)
+{
+	UNUSED_PARAMETER(param);
+	auto dsk = request_dock(request_data, response_data);
+	if (!dsk)
+		return;
+	if (!obs_data_has_user_value(request_data, "hold")) {
+		obs_data_set_string(response_data, "error", "'hold' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	const bool hold = obs_data_get_bool(request_data, "hold");
+	QMetaObject::invokeMethod(dsk, [dsk, hold]() { dsk->SetHoldKeyers(hold); }, Qt::QueuedConnection);
+	obs_data_set_bool(response_data, "success", true);
+}
+
+// websocket dsk_set_keyer_off_at_scene_change: arm (enabled: true) or disarm Keyer Off at Scene Change
+void DownstreamKeyerDock::set_keyer_off_at_scene_change(obs_data_t *request_data, obs_data_t *response_data, void *param)
+{
+	UNUSED_PARAMETER(param);
+	auto dsk = request_dock(request_data, response_data);
+	if (!dsk)
+		return;
+	if (!obs_data_has_user_value(request_data, "enabled")) {
+		obs_data_set_string(response_data, "error", "'enabled' not set");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	const bool enabled = obs_data_get_bool(request_data, "enabled");
+	QMetaObject::invokeMethod(dsk, [dsk, enabled]() { dsk->SetOffAtSceneChange(enabled); }, Qt::QueuedConnection);
+	obs_data_set_bool(response_data, "success", true);
+}
+
+// websocket dsk_transition_keyers: Transition Keyers (main output, studio mode)
+void DownstreamKeyerDock::transition_keyers(obs_data_t *request_data, obs_data_t *response_data, void *param)
+{
+	UNUSED_PARAMETER(param);
+	auto dsk = request_dock(request_data, response_data);
+	if (!dsk)
+		return;
+	if (dsk->view || dsk->canvas || !obs_frontend_preview_program_mode_active()) {
+		obs_data_set_string(response_data, "error", "studio mode is not active for this output");
+		obs_data_set_bool(response_data, "success", false);
+		return;
+	}
+	QMetaObject::invokeMethod(dsk, [dsk]() { dsk->TransitionKeyers(); }, Qt::QueuedConnection);
+	obs_data_set_bool(response_data, "success", true);
 }
 
 void DownstreamKeyerDock::remove_canvas(void *data, calldata_t *cd)

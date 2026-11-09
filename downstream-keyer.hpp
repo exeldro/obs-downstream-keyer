@@ -215,6 +215,8 @@ public:
 	// put these keyer scenes on the output now (with the keyer transition)
 	void TakeLive(const QStringList &scenes) { SetLiveScenes(InListOrder(scenes)); }
 	bool ArmScene(const QString &scene_name);
+	bool ArmScenes(const QStringList &scenes);
+	bool HasScenes(const QStringList &scenes);
 	void StudioModeChanged();
 	// transitionEnded: called when the program transition finished, so it is not checked for still running
 	void CheckPreviewTake(bool transitionEnded = false);

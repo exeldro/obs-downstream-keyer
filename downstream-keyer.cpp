@@ -1272,13 +1272,29 @@ bool DownstreamKeyer::ArmScene(const QString &scene_name)
 {
 	if (scene_name.isEmpty())
 		return true;
-	if (scenesList->findItems(scene_name, Qt::MatchFixedString).isEmpty())
+	return ArmScenes({scene_name});
+}
+
+// are all these scenes in the keyer's list
+bool DownstreamKeyer::HasScenes(const QStringList &scenes)
+{
+	for (const auto &s : scenes) {
+		if (scenesList->findItems(s, Qt::MatchFixedString).isEmpty())
+			return false;
+	}
+	return true;
+}
+
+// check exactly these scenes (websocket dsk_go_live / dsk_go_to_preview)
+bool DownstreamKeyer::ArmScenes(const QStringList &scenes)
+{
+	if (!HasScenes(scenes))
 		return false;
 	{
 		const QSignalBlocker blocker(scenesList);
 		for (int i = 0; i < scenesList->count(); i++) {
 			auto item = scenesList->item(i);
-			item->setCheckState(item->text() == scene_name ? Qt::Checked : Qt::Unchecked);
+			item->setCheckState(scenes.contains(item->text()) ? Qt::Checked : Qt::Unchecked);
 		}
 	}
 	ScenesChecked();
