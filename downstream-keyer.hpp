@@ -10,6 +10,7 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QWidget>
+#include <functional>
 #include <set>
 
 #include "obs.h"
@@ -27,11 +28,12 @@ public:
 
 enum transitionType { match, show, hide, override };
 
-// what the keyer does when the program scene transitions
-enum sceneChangeMode {
-	sceneChangeNone = 0, // neither button on: the live scenes stay live
-	sceneChangeOn = 1,   // Go Live at Scene Change: the checked scenes go live with the transition
-	sceneChangeOff = 2,  // Keyer Off at Scene Change: the keyer goes off with the transition
+// What the dock's All Keyers buttons mean for a program scene change
+struct SceneChangeContext {
+	// Hold Keyers: keyers stay as they are, Load On Scene and Exclude Scene are not applied (cues still go live)
+	bool hold = false;
+	// Keyer Off at Scene Change, or a cued keyer is taken live: keyers not loaded on the new scene go off
+	bool clearOthers = false;
 };
 
 // Registers the private video only source used to leave keyer audio out of the mix.
@@ -41,6 +43,10 @@ void dsk_register_video_only_source();
 void dsk_remove_preview_items(obs_source_t *scene_source, const char *owner);
 // Remove leftover Go to Preview scene items from all scenes (for example after a crash while previewing).
 void dsk_purge_preview_items();
+// While the main program transition runs, preview overlays are not added (the preview scene may be going on air).
+void dsk_set_program_transition_active(bool active);
+// The scene on the main program output (a private copy with scene duplication), with a reference.
+obs_source_t *dsk_get_main_program_scene();
 
 class DownstreamKeyer : public QWidget {
 	Q_OBJECT
@@ -58,19 +64,23 @@ private:
 	QWidget *sideColumn;
 	QPushButton *goLiveButton;
 	QPushButton *previewButton;
-	QPushButton *keyerOffButton;
-	QPushButton *changeOnButton;
-	QPushButton *changeOffButton;
+	QPushButton *transitionKeyersButton;
+	// set by the dock: take every cued keyer live without a scene transition
+	std::function<void()> transitionKeyers;
 	uint32_t transitionDuration;
 	uint32_t showTransitionDuration;
 	uint32_t hideTransitionDuration;
 	uint32_t overrideTransitionDuration = 300;
 	uint32_t hideAfter = 0;
-	int sceneChangeMode = sceneChangeNone;
+	// Hold Keyers is on: Hide After does not count down
+	bool held = false;
+	// set by the dock: the All Keyers settings for a scene change, and a call to refresh every keyer's preview
+	// forPreview: worked out for the preview scene (any cue counts), not for a transition that started
+	std::function<SceneChangeContext(const std::string &scene, bool forPreview)> contextProvider;
+	std::function<void()> stateChanged;
 	// mix the audio of the keyer scenes into the output (off by default: video only)
 	bool includeAudio = false;
 	obs_hotkey_id null_hotkey_id;
-	obs_hotkey_pair_id tie_hotkey_id;
 	obs_hotkey_id go_live_hotkey_id;
 	obs_hotkey_id preview_hotkey_id;
 
@@ -83,11 +93,17 @@ private:
 	// checked scenes, to notice when the check boxes change
 	QStringList checkedCache;
 
-	// Go to Preview (studio mode, main canvas only): previewSource is added on top of the preview scene
+	// Go to Preview (studio mode, main canvas only): the scenes cued for the preview scene
 	QStringList previewScenes;
 	obs_source_t *previewSource = nullptr;
-	obs_weak_source_t *previewTarget = nullptr;
-	obs_weak_source_t *previewProgramAtAttach = nullptr;
+
+	// Preview overlay: in studio mode the preview scene shows what this keyer will show after a transition to it
+	// (the cued scenes, or the live / checked scenes by the scene change setting), as a locked scene item on top.
+	QStringList overlayScenes;
+	obs_source_t *overlayChild = nullptr;
+	obs_weak_source_t *overlayPreviewScene = nullptr; // the preview scene the overlay was worked out for
+	obs_weak_source_t *overlayTarget = nullptr;       // the scene the item was added to
+	obs_weak_source_t *overlayProgramAtAttach = nullptr;
 	std::string previewToken;
 
 	std::set<std::string> exclude_scenes;
@@ -106,9 +122,6 @@ private:
 
 	static void null_hotkey(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed);
 
-	static bool enable_tie_hotkey(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed);
-	static bool disable_tie_hotkey(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed);
-
 	static void go_live_hotkey(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed);
 	static void preview_hotkey(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed);
 
@@ -120,13 +133,14 @@ private:
 	QStringList InListOrder(const QStringList &scenes);
 	void SetLiveScenes(const QStringList &scenes, obs_source_t *source = nullptr, bool useTransition = true);
 	void SetSceneHotkey(obs_hotkey_pair_id id, bool show);
-	bool IsHiddenOn(const std::string &scene);
-	bool IsPreviewTakeTo(const std::string &scene);
 	void set_output(obs_source_t *source);
 	void UpdateTally();
 	void UpdateButtons();
-	void AttachPreview();
-	void RemovePreviewItems(bool everywhere);
+	QStringList PredictedScenes(const std::string &scene, const SceneChangeContext &ctx);
+	SceneChangeContext GetContext(const std::string &scene, bool forPreview);
+	// Load On Scene: the scenes loaded when a listed scene goes live and nothing is live
+	QStringList AutoLoadScenes();
+	void RemoveOverlay(bool everywhere);
 	bool PreviewSupported();
 	void ScenesChecked();
 
@@ -160,6 +174,25 @@ public:
 	int GetHideAfter();
 	// the program scene changes to scene (main output: when its transition starts)
 	void SceneChanged(std::string scene);
+	void SceneChanged(const std::string &scene, const SceneChangeContext &ctx);
+	// Hold Keyers was turned off: match the Load On Scene keyers of the program scene, everything else goes off
+	void SyncToProgramScene(const std::string &scene);
+	void SetContextProvider(std::function<SceneChangeContext(const std::string &, bool)> provider,
+				std::function<void()> changed)
+	{
+		contextProvider = std::move(provider);
+		stateChanged = std::move(changed);
+	}
+	void SetTransitionKeyers(std::function<void()> callback) { transitionKeyers = std::move(callback); }
+	// enabled while any keyer in the dock is cued
+	void SetTransitionKeyersEnabled(bool enabled);
+	void SetHeld(bool on)
+	{
+		held = on;
+		if (on)
+			hideTimer.stop();
+	}
+	bool IsLoadedOn(const std::string &scene) { return load_scenes.find(scene) != load_scenes.end(); }
 	void AddExcludeScene(const char *scene_name);
 	void RemoveExcludeScene(const char *scene_name);
 	bool IsSceneExcluded(const char *scene_name);
@@ -171,15 +204,21 @@ public:
 	void add_scene(QString scene_name, obs_source_t *s, int insertBeforeRow);
 	bool AddScene(QString scene_name, int insertBeforeRow);
 	bool RemoveScene(QString scene_name);
-	void SetTie(bool tie);
-	void SetSceneChangeMode(int mode);
 	void SetIncludeAudio(bool include);
 	bool GetIncludeAudio() { return includeAudio; }
 	void SetOutputChannel(int outputChannel);
 	bool IsPreviewing() { return !previewScenes.isEmpty(); }
+	bool IsPreviewTakeTo(const std::string &scene);
+	// tally: on the program output right now, and shown on the studio mode preview scene
+	bool IsLiveOnOutput();
+	bool IsOnPreview() { return overlayTarget != nullptr; }
 	bool ArmScene(const QString &scene_name);
 	void StudioModeChanged();
-	void CheckPreviewTake();
+	// transitionEnded: called when the program transition finished, so it is not checked for still running
+	void CheckPreviewTake(bool transitionEnded = false);
 	void PreviewSceneChanged();
 	void ClearPreview();
+	// the main program transition to dest started
+	void ProgramTransitionStarting(obs_source_t *dest);
+	void UpdatePreviewOverlay(bool force = false);
 };

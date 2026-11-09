@@ -5,12 +5,18 @@
 #include "obs-websocket-api.h"
 #include "version.h"
 #include <obs-module.h>
+#include <QHBoxLayout>
+#include <QLabel>
 #include <QMainWindow>
+#include <QPainter>
+#include <QPixmap>
 #include <QMenu>
 #include <QPushButton>
+#include <QThread>
 #include <QVBoxLayout>
 #include <QWidgetAction>
 #include <util/platform.h>
+#include <vector>
 
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -231,8 +237,10 @@ static void frontend_event(enum obs_frontend_event event, void *data)
 	} else if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP) {
 		load_data = nullptr;
 	} else if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING || event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED) {
-		// Go to Preview scene items left in a saved scene collection (OBS closed or crashed while previewing)
+		// preview scene items left in a saved scene collection (OBS closed or crashed), then show the current ones
 		dsk_purge_preview_items();
+		for (auto &dsk : _dsks)
+			dsk.second->RefreshPreviewOverlays();
 	}
 }
 
@@ -353,15 +361,30 @@ void DownstreamKeyerDock::frontend_event(enum obs_frontend_event event, void *da
 		}
 	} else if (event == OBS_FRONTEND_EVENT_EXIT) {
 		downstreamKeyerDock->ClearKeyers();
-	} else if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED) {
-		downstreamKeyerDock->ForEachKeyer([](DownstreamKeyer *w) { w->CheckPreviewTake(); });
-		QMetaObject::invokeMethod(downstreamKeyerDock, "SceneChanged", Qt::QueuedConnection);
-	} else if (event == OBS_FRONTEND_EVENT_TRANSITION_STOPPED) {
-		downstreamKeyerDock->ForEachKeyer([](DownstreamKeyer *w) { w->CheckPreviewTake(); });
+	} else if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED || event == OBS_FRONTEND_EVENT_TRANSITION_STOPPED) {
+		// the program transition is done: take cues live, then show the next look on the preview again
+		dsk_set_program_transition_active(false);
+		downstreamKeyerDock->ForEachKeyer([](DownstreamKeyer *w) { w->CheckPreviewTake(true); });
+		// after a program transition no preview copy belongs in the program scene (a cue was just taken above)
+		if (!downstreamKeyerDock->view && !downstreamKeyerDock->canvas) {
+			obs_source_t *program = dsk_get_main_program_scene();
+			if (program)
+				dsk_remove_preview_items(program, nullptr);
+			obs_source_release(program);
+		}
+		if (downstreamKeyerDock->offAtSceneChangeUsed) {
+			downstreamKeyerDock->offAtSceneChangeUsed = false;
+			downstreamKeyerDock->SetOffAtSceneChange(false);
+		}
+		downstreamKeyerDock->RefreshPreviewOverlays(true);
+		if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED)
+			QMetaObject::invokeMethod(downstreamKeyerDock, "SceneChanged", Qt::QueuedConnection);
 	} else if (event == OBS_FRONTEND_EVENT_PREVIEW_SCENE_CHANGED) {
 		downstreamKeyerDock->ForEachKeyer([](DownstreamKeyer *w) { w->PreviewSceneChanged(); });
+		downstreamKeyerDock->UpdateTabTally();
 	} else if (event == OBS_FRONTEND_EVENT_STUDIO_MODE_ENABLED || event == OBS_FRONTEND_EVENT_STUDIO_MODE_DISABLED) {
 		downstreamKeyerDock->ForEachKeyer([](DownstreamKeyer *w) { w->StudioModeChanged(); });
+		downstreamKeyerDock->UpdateTabTally();
 	} else if (event == OBS_FRONTEND_EVENT_SCRIPTING_SHUTDOWN) {
 		downstreamKeyerDock->closing = true;
 		downstreamKeyerDock->ClearKeyers();
@@ -407,10 +430,44 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v,
 	connect(config, &QAbstractButton::clicked, this, &DownstreamKeyerDock::ConfigClicked);
 
 	tabs->setCornerWidget(config);
+
+	// All Keyers: buttons above the tabs that act on every keyer in this dock
+	auto allKeyersTitle = new QLabel(QT_UTF8(obs_module_text("AllKeyersTitle")), this);
+	QFont titleFont = allKeyersTitle->font();
+	titleFont.setBold(true);
+	allKeyersTitle->setFont(titleFont);
+
+	auto keyerOffButton = new QPushButton(QT_UTF8(obs_module_text("KeyerOff")), this);
+	connect(keyerOffButton, &QPushButton::clicked, this, &DownstreamKeyerDock::AllKeyersOff);
+
+	offAtSceneChangeButton = new QPushButton(QT_UTF8(obs_module_text("SceneChangeOff")), this);
+	offAtSceneChangeButton->setCheckable(true);
+	offAtSceneChangeButton->setToolTip(QT_UTF8(obs_module_text("SceneChangeOffTip")));
+	connect(offAtSceneChangeButton, &QPushButton::clicked, this, &DownstreamKeyerDock::SetOffAtSceneChange);
+
+	holdKeyersButton = new QPushButton(QT_UTF8(obs_module_text("HoldKeyers")), this);
+	holdKeyersButton->setCheckable(true);
+	holdKeyersButton->setToolTip(QT_UTF8(obs_module_text("HoldKeyersTip")));
+	connect(holdKeyersButton, &QPushButton::clicked, this, &DownstreamKeyerDock::SetHoldKeyers);
+
+	auto allKeyersRow = new QHBoxLayout;
+	allKeyersRow->setContentsMargins(4, 0, 4, 0);
+	allKeyersRow->setSpacing(4);
+	allKeyersRow->addWidget(keyerOffButton);
+	allKeyersRow->addWidget(offAtSceneChangeButton);
+	allKeyersRow->addWidget(holdKeyersButton);
+
 	auto l = new QVBoxLayout;
 	l->setContentsMargins(0, 0, 0, 0);
+	l->setSpacing(4);
+	auto titleRow = new QHBoxLayout;
+	titleRow->setContentsMargins(4, 4, 4, 0);
+	titleRow->addWidget(allKeyersTitle);
+	l->addLayout(titleRow);
+	l->addLayout(allKeyersRow);
 	l->addWidget(tabs);
 	setLayout(l);
+	UpdateAllKeyersButtons();
 
 	obs_frontend_add_save_callback(frontend_save_load, this);
 	obs_frontend_add_event_callback(frontend_event, this);
@@ -431,17 +488,152 @@ void DownstreamKeyerDock::transition_start(void *data, calldata_t *cd)
 	obs_source_t *dest = obs_transition_get_source(tr, OBS_TRANSITION_SOURCE_B);
 	if (!dest) // fade to black
 		return;
-	const std::string name = obs_source_get_name(dest);
-	obs_source_release(dest);
-	QMetaObject::invokeMethod(dock, [dock, name]() { dock->ProgramTransitionStarting(name); }, Qt::QueuedConnection);
+	dsk_set_program_transition_active(true);
+	// the frontend starts transitions on the UI thread: handle it right away, before the preview copies are drawn
+	if (QThread::currentThread() == dock->thread()) {
+		dock->ProgramTransitionStarting(dest);
+		obs_source_release(dest);
+		return;
+	}
+	QMetaObject::invokeMethod(
+		dock,
+		[dock, dest]() {
+			dock->ProgramTransitionStarting(dest);
+			obs_source_release(dest);
+		},
+		Qt::QueuedConnection);
 }
 
-void DownstreamKeyerDock::ProgramTransitionStarting(const std::string &scene)
+void DownstreamKeyerDock::ProgramTransitionStarting(obs_source_t *dest)
 {
 	if (closing)
 		return;
+	const std::string scene = obs_source_get_name(dest);
 	transitionStartedScene = scene;
-	ForEachKeyer([&scene](DownstreamKeyer *w) { w->SceneChanged(scene); });
+	// work out the All Keyers context first: whether a cue is being taken depends on the cued preview items
+	const auto ctx = GetSceneChangeContext(scene, false);
+	if (offAtSceneChange && !holdKeyers)
+		offAtSceneChangeUsed = true; // turned off when the transition ends
+	ForEachKeyer([dest](DownstreamKeyer *w) { w->ProgramTransitionStarting(dest); });
+	ForEachKeyer([&scene, &ctx](DownstreamKeyer *w) { w->SceneChanged(scene, ctx); });
+	UpdateTabTally();
+}
+
+void DownstreamKeyerDock::RefreshPreviewOverlays(bool force)
+{
+	bool anyCue = false;
+	ForEachKeyer([&anyCue, force](DownstreamKeyer *w) {
+		w->UpdatePreviewOverlay(force);
+		anyCue = anyCue || w->IsPreviewing();
+	});
+	ForEachKeyer([anyCue](DownstreamKeyer *w) { w->SetTransitionKeyersEnabled(anyCue); });
+	UpdateTabTally();
+}
+
+static QIcon tally_icon(const QColor &color)
+{
+	QPixmap pixmap(12, 12);
+	pixmap.fill(Qt::transparent);
+	QPainter painter(&pixmap);
+	painter.setRenderHint(QPainter::Antialiasing);
+	painter.setPen(Qt::NoPen);
+	painter.setBrush(color);
+	painter.drawEllipse(1, 1, 10, 10);
+	return QIcon(pixmap);
+}
+
+// tab tally dot: red while the keyer is on program, green while it shows on the studio mode preview
+void DownstreamKeyerDock::UpdateTabTally()
+{
+	if (closing)
+		return;
+	static const QIcon live = tally_icon(QColor(230, 60, 60));
+	static const QIcon preview = tally_icon(QColor(70, 190, 100));
+	for (int i = 0; i < tabs->count(); i++) {
+		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
+		if (!w)
+			continue;
+		if (w->IsLiveOnOutput())
+			tabs->setTabIcon(i, live);
+		else if (w->IsOnPreview())
+			tabs->setTabIcon(i, preview);
+		else
+			tabs->setTabIcon(i, QIcon());
+	}
+}
+
+SceneChangeContext DownstreamKeyerDock::GetSceneChangeContext(const std::string &scene, bool forPreview)
+{
+	SceneChangeContext ctx;
+	ctx.hold = holdKeyers;
+	bool cueTaken = false;
+	ForEachKeyer([&](DownstreamKeyer *w) {
+		if (forPreview ? w->IsPreviewing() : w->IsPreviewTakeTo(scene))
+			cueTaken = true;
+	});
+	ctx.clearOthers = offAtSceneChange || cueTaken;
+	return ctx;
+}
+
+void DownstreamKeyerDock::SetupKeyer(DownstreamKeyer *keyer)
+{
+	keyer->SetContextProvider([this](const std::string &scene,
+					 bool forPreview) { return GetSceneChangeContext(scene, forPreview); },
+				  [this]() { RefreshPreviewOverlays(false); });
+	keyer->SetTransitionKeyers([this]() { TransitionKeyers(); });
+	keyer->SetHeld(holdKeyers);
+}
+
+// Transition Keyers: take every cued keyer live without a scene transition. The other keyers follow the same rule
+// as when a cue is taken with a scene change, for the current program scene.
+void DownstreamKeyerDock::TransitionKeyers()
+{
+	std::vector<DownstreamKeyer *> cued, others;
+	ForEachKeyer([&](DownstreamKeyer *w) { (w->IsPreviewing() ? cued : others).push_back(w); });
+	if (cued.empty())
+		return;
+	for (auto w : cued)
+		w->GoLive();
+	if (holdKeyers)
+		return;
+	// the rest keep only the Load On Scene keyers of the program scene (loading them if needed)
+	const auto scene = ProgramSceneName();
+	for (auto w : others)
+		w->SyncToProgramScene(scene);
+}
+
+void DownstreamKeyerDock::AllKeyersOff()
+{
+	ForEachKeyer([](DownstreamKeyer *w) { w->KeyerOff(); });
+}
+
+void DownstreamKeyerDock::SetOffAtSceneChange(bool on)
+{
+	offAtSceneChange = on;
+	UpdateAllKeyersButtons();
+	RefreshPreviewOverlays(false);
+}
+
+void DownstreamKeyerDock::SetHoldKeyers(bool on)
+{
+	holdKeyers = on;
+	UpdateAllKeyersButtons();
+	// stops any Hide After countdown while held; when released, keyers that stay live start it again
+	ForEachKeyer([on](DownstreamKeyer *w) { w->SetHeld(on); });
+	if (!on) {
+		// match the Load On Scene keyers of the program scene, everything else goes off
+		const auto scene = ProgramSceneName();
+		ForEachKeyer([&scene](DownstreamKeyer *w) { w->SyncToProgramScene(scene); });
+	}
+	RefreshPreviewOverlays(false);
+}
+
+void DownstreamKeyerDock::UpdateAllKeyersButtons()
+{
+	offAtSceneChangeButton->setChecked(offAtSceneChange);
+	holdKeyersButton->setChecked(holdKeyers);
+	// Hold Keyers overrides Keyer Off at Scene Change
+	offAtSceneChangeButton->setEnabled(!holdKeyers);
 }
 
 DownstreamKeyerDock::~DownstreamKeyerDock()
@@ -494,6 +686,9 @@ void DownstreamKeyerDock::Save(obs_data_t *data)
 		obs_data_set_array(data, "downstream_keyers", keyers);
 	}
 	obs_data_array_release(keyers);
+	const std::string prefix = viewName.empty() ? "" : viewName + "_";
+	obs_data_set_bool(data, (prefix + "downstream_keyers_hold").c_str(), holdKeyers);
+	obs_data_set_bool(data, (prefix + "downstream_keyers_off_at_scene_change").c_str(), offAtSceneChange);
 }
 
 void DownstreamKeyerDock::Load(obs_data_t *data)
@@ -519,6 +714,10 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 		}
 		keyers = obs_data_get_array(data, "downstream_keyers");
 	}
+	const std::string prefix = viewName.empty() ? "" : viewName + "_";
+	holdKeyers = obs_data_get_bool(data, (prefix + "downstream_keyers_hold").c_str());
+	offAtSceneChange = obs_data_get_bool(data, (prefix + "downstream_keyers_off_at_scene_change").c_str());
+	UpdateAllKeyersButtons();
 	ClearKeyers();
 	if (keyers) {
 		auto count = obs_data_array_count(keyers);
@@ -530,6 +729,7 @@ void DownstreamKeyerDock::Load(obs_data_t *data)
 			auto keyerData = obs_data_array_item(keyers, i);
 			auto keyer = new DownstreamKeyer((int)(outputChannel + i), QT_UTF8(obs_data_get_string(keyerData, "name")),
 							 view, c, get_transitions, get_transitions_data);
+			SetupKeyer(keyer);
 			keyer->Load(keyerData);
 			tabs->addTab(keyer, keyer->objectName());
 			obs_data_release(keyerData);
@@ -570,15 +770,12 @@ void DownstreamKeyerDock::AddDefaultKeyer()
 	auto keyer = new DownstreamKeyer(outputChannel, QT_UTF8(obs_module_text("DefaultName")), view, c, get_transitions,
 					 get_transitions_data);
 	obs_canvas_release(c);
+	SetupKeyer(keyer);
 	tabs->addTab(keyer, keyer->objectName());
 }
-void DownstreamKeyerDock::SceneChanged()
+// the program scene of this dock: the main program scene, or the active scene of its view / canvas
+std::string DownstreamKeyerDock::ProgramSceneName()
 {
-	if (closing) {
-		return;
-	}
-	const int count = tabs->count();
-
 	obs_source_t *scene = nullptr;
 	if (view) {
 		obs_source_t *source = obs_view_get_source(view, 0);
@@ -619,19 +816,27 @@ void DownstreamKeyerDock::SceneChanged()
 		scene = obs_frontend_get_current_scene();
 	}
 	std::string scene_name = scene ? obs_source_get_name(scene) : "";
+	obs_source_release(scene);
+	return scene_name;
+}
+
+void DownstreamKeyerDock::SceneChanged()
+{
+	if (closing) {
+		return;
+	}
+	const std::string scene_name = ProgramSceneName();
 	if (!view && !canvas && !transitionStartedScene.empty() && scene_name == transitionStartedScene) {
 		// already handled when the transition to this scene started
 		transitionStartedScene.clear();
-		obs_source_release(scene);
 		return;
 	}
-	for (int i = 0; i < count; i++) {
-		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
-		if (w) {
-			w->SceneChanged(scene_name);
-		}
-	}
-	obs_source_release(scene);
+	const auto ctx = GetSceneChangeContext(scene_name, false);
+	ForEachKeyer([&scene_name, &ctx](DownstreamKeyer *w) { w->SceneChanged(scene_name, ctx); });
+	// Keyer Off at Scene Change is one-shot
+	if (offAtSceneChange && !holdKeyers)
+		SetOffAtSceneChange(false);
+	UpdateTabTally();
 }
 
 void DownstreamKeyerDock::AddTransitionMenu(QMenu *tm, enum transitionType transition_type)
@@ -823,6 +1028,7 @@ void DownstreamKeyerDock::Add(QString name)
 	obs_canvas_t *c = obs_weak_canvas_get_canvas(canvas);
 	auto keyer = new DownstreamKeyer(outputChannel + tabs->count(), name, view, c, get_transitions, get_transitions_data);
 	obs_canvas_release(c);
+	SetupKeyer(keyer);
 	tabs->addTab(keyer, keyer->objectName());
 }
 
@@ -902,19 +1108,6 @@ bool DownstreamKeyerDock::RemoveScene(QString dskName, QString sceneName)
 			if (w->RemoveScene(sceneName)) {
 				return true;
 			}
-		}
-	}
-	return false;
-}
-
-bool DownstreamKeyerDock::SetTie(QString dskName, bool tie)
-{
-	const int count = tabs->count();
-	for (int i = 0; i < count; i++) {
-		auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
-		if (w->objectName() == dskName) {
-			w->SetTie(tie);
-			return true;
 		}
 	}
 	return false;
@@ -1175,29 +1368,13 @@ void DownstreamKeyerDock::remove_scene(obs_data_t *request_data, obs_data_t *res
 	obs_data_set_bool(response_data, "success", dsk->RemoveScene(QString::fromUtf8(dsk_name), QString::fromUtf8(scene_name)));
 }
 
+// Tie was replaced by the All Keyers buttons (Keyer Off at Scene Change, Hold Keyers)
 void DownstreamKeyerDock::set_tie(obs_data_t *request_data, obs_data_t *response_data, void *param)
 {
+	UNUSED_PARAMETER(request_data);
 	UNUSED_PARAMETER(param);
-	const char *viewName = obs_data_get_string(request_data, "view_name");
-	if (_dsks.find(viewName) == _dsks.end()) {
-		obs_data_set_string(response_data, "error", "'view_name' not found");
-		obs_data_set_bool(response_data, "success", false);
-		return;
-	}
-	auto dsk = _dsks[viewName];
-	const char *dsk_name = obs_data_get_string(request_data, "dsk_name");
-	if (!obs_data_has_user_value(request_data, "tie")) {
-		obs_data_set_string(response_data, "error", "'tie' not set");
-		obs_data_set_bool(response_data, "success", false);
-		return;
-	}
-	const bool tie = obs_data_get_bool(request_data, "tie");
-	if (!dsk_name || !strlen(dsk_name)) {
-		obs_data_set_string(response_data, "error", "'dsk_name' not set");
-		obs_data_set_bool(response_data, "success", false);
-		return;
-	}
-	obs_data_set_bool(response_data, "success", dsk->SetTie(QString::fromUtf8(dsk_name), tie));
+	obs_data_set_string(response_data, "error", "tie is no longer supported");
+	obs_data_set_bool(response_data, "success", false);
 }
 
 void DownstreamKeyerDock::set_transition(obs_data_t *request_data, obs_data_t *response_data, void *param)

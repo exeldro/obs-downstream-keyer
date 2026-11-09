@@ -4,6 +4,7 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <QFrame>
+#include <QPushButton>
 #include <obs-frontend-api.h>
 #include "downstream-keyer.hpp"
 #include "obs-websocket-api.h"
@@ -21,13 +22,20 @@ private:
 	get_transitions_callback_t get_transitions = nullptr;
 	void *get_transitions_data = nullptr;
 
+	// All Keyers: Hold Keyers overrides Keyer Off at Scene Change, the Keyer Off button overrides both
+	bool holdKeyers = false;
+	bool offAtSceneChange = false;
+	// Keyer Off at Scene Change is one-shot: it was used by the program transition that is running
+	bool offAtSceneChangeUsed = false;
+	QPushButton *offAtSceneChangeButton = nullptr;
+	QPushButton *holdKeyersButton = nullptr;
+
 	void Save(obs_data_t *data);
 	void Load(obs_data_t *data);
 	QString GetScene(QString dskName);
 	bool SwitchDSK(QString dskName, QString sceneName);
 	bool AddScene(QString dskName, QString sceneName, int insertBeforeRow);
 	bool RemoveScene(QString dskName, QString sceneName);
-	bool SetTie(QString dskName, bool tie);
 	bool SetTransition(const QString &chars, const char *transition, int duration, transitionType tt);
 	bool AddExcludeScene(QString dskName, const char *sceneName);
 	bool RemoveExcludeScene(QString dskName, const char *sceneName);
@@ -46,9 +54,18 @@ private:
 	// program scene whose transition start was already handled, so the end of it is skipped
 	std::string transitionStartedScene;
 	static void transition_start(void *data, calldata_t *cd);
-	void ProgramTransitionStarting(const std::string &scene);
+	void ProgramTransitionStarting(obs_source_t *dest);
 	bool KeyerAction(QString dskName, QString sceneName, bool preview);
 	static void keyer_action_request(obs_data_t *request_data, obs_data_t *response_data, bool preview);
+
+	SceneChangeContext GetSceneChangeContext(const std::string &scene, bool forPreview);
+	std::string ProgramSceneName();
+	void SetupKeyer(DownstreamKeyer *keyer);
+	void AllKeyersOff();
+	void TransitionKeyers();
+	void SetOffAtSceneChange(bool on);
+	void SetHoldKeyers(bool on);
+	void UpdateAllKeyersButtons();
 
 	void ClearKeyers();
 	void AddDefaultKeyer();
@@ -66,6 +83,9 @@ public:
 	DownstreamKeyerDock(QWidget *parent = nullptr, int outputChannel = 7, obs_view_t *view = nullptr,
 			    obs_canvas_t *canvas = nullptr, const char *view_name = nullptr);
 	~DownstreamKeyerDock();
+
+	void RefreshPreviewOverlays(bool force = true);
+	void UpdateTabTally();
 
 	void SetTransitions(get_transitions_callback_t get_transitions = nullptr, void *get_transitions_data = nullptr);
 

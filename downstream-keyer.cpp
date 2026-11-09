@@ -15,6 +15,8 @@
 #include <obs-frontend-api.h>
 
 #include "obs-module.h"
+#include <algorithm>
+#include <atomic>
 #include <vector>
 
 #define QT_UTF8(str) QString::fromUtf8(str)
@@ -108,31 +110,15 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_c
 	connect(previewButton, &QPushButton::clicked, this, &DownstreamKeyer::TogglePreview);
 	column->addWidget(previewButton);
 
-	keyerOffButton = new QPushButton(QT_UTF8(obs_module_text("KeyerOff")), sideColumn);
-	keyerOffButton->setObjectName(QStringLiteral("dskKeyerOff"));
-	connect(keyerOffButton, &QPushButton::clicked, this, &DownstreamKeyer::KeyerOff);
-	column->addWidget(keyerOffButton);
-
-	column->addSpacing(8);
-
-	addTitle("SceneChangeTitle");
-
-	// at most one of these is on; with neither on the live scenes stay live on a scene change
-	auto addModeButton = [&](const char *text, int mode) {
-		auto b = new QPushButton(QT_UTF8(obs_module_text(text)).replace("\\n", "\n"), sideColumn);
-		b->setCheckable(true);
-		column->addWidget(b);
-		connect(b, &QPushButton::clicked, this,
-			[this, mode](bool checked) { SetSceneChangeMode(checked ? mode : sceneChangeNone); });
-		return b;
-	};
-	changeOnButton = addModeButton("SceneChangeOn", sceneChangeOn);
-	changeOffButton = addModeButton("SceneChangeOff", sceneChangeOff);
-
-	auto sceneChangeNote = new QLabel(QT_UTF8(obs_module_text("SceneChangeNote")), sideColumn);
-	sceneChangeNote->setAlignment(Qt::AlignCenter);
-	sceneChangeNote->setWordWrap(true);
-	column->addWidget(sceneChangeNote);
+	transitionKeyersButton = new QPushButton(QT_UTF8(obs_module_text("TransitionKeyers")), sideColumn);
+	transitionKeyersButton->setObjectName(QStringLiteral("dskTransitionKeyers"));
+	transitionKeyersButton->setToolTip(QT_UTF8(obs_module_text("TransitionKeyersTip")));
+	transitionKeyersButton->setEnabled(false);
+	connect(transitionKeyersButton, &QPushButton::clicked, this, [this]() {
+		if (transitionKeyers)
+			transitionKeyers();
+	});
+	column->addWidget(transitionKeyersButton);
 
 	column->addStretch();
 	row->addWidget(sideColumn);
@@ -203,17 +189,6 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_c
 
 	null_hotkey_id =
 		obs_hotkey_register_frontend(QT_TO_UTF8(disableDskHotkeyName), QT_TO_UTF8(disableDskHotkeyName), null_hotkey, this);
-	QString enableTieHotkeyName = QT_UTF8(obs_module_text("EnableTie"));
-	enableTieHotkeyName += " ";
-	enableTieHotkeyName += name;
-	QString disableTieHotkeyName = QT_UTF8(obs_module_text("DisableTie"));
-	disableTieHotkeyName += " ";
-	disableTieHotkeyName += name;
-
-	tie_hotkey_id = obs_hotkey_pair_register_frontend(QT_TO_UTF8(enableTieHotkeyName), QT_TO_UTF8(enableTieHotkeyName),
-							  QT_TO_UTF8(disableTieHotkeyName), QT_TO_UTF8(disableTieHotkeyName),
-							  enable_tie_hotkey, disable_tie_hotkey, this, this);
-
 	QString goLiveHotkeyName = QT_UTF8(obs_module_text("GoLive"));
 	goLiveHotkeyName += " ";
 	goLiveHotkeyName += name;
@@ -243,15 +218,10 @@ DownstreamKeyer::~DownstreamKeyer()
 		obs_set_output_source(outputChannel, nullptr);
 	}
 	obs_hotkey_unregister(null_hotkey_id);
-	obs_hotkey_pair_unregister(tie_hotkey_id);
 	obs_hotkey_unregister(go_live_hotkey_id);
 	obs_hotkey_unregister(preview_hotkey_id);
 
-	RemovePreviewItems(false);
-	obs_weak_source_release(previewTarget);
-	previewTarget = nullptr;
-	obs_weak_source_release(previewProgramAtAttach);
-	previewProgramAtAttach = nullptr;
+	RemoveOverlay(false);
 	obs_source_release(previewSource);
 	previewSource = nullptr;
 	obs_source_release(liveSource);
@@ -375,6 +345,13 @@ void DownstreamKeyer::KeyerOff()
 	obs_source_release(liveSource);
 	liveSource = nullptr;
 	apply_source(nullptr);
+	// safety net: never leave this keyer's preview copy in the program scene
+	if (PreviewSupported()) {
+		obs_source_t *program = dsk_get_main_program_scene();
+		if (program)
+			dsk_remove_preview_items(program, previewToken.c_str());
+		obs_source_release(program);
+	}
 	UpdateTally();
 }
 
@@ -391,7 +368,7 @@ void DownstreamKeyer::set_output(obs_source_t *source)
 
 void DownstreamKeyer::apply_source(obs_source_t *const newSource, bool useTransition)
 {
-	if (newSource && hideAfter > 0) {
+	if (newSource && hideAfter > 0 && !held) {
 		hideTimer.stop();
 		hideTimer.setInterval(hideAfter);
 		hideTimer.start();
@@ -565,6 +542,16 @@ void dsk_register_video_only_source()
 	obs_register_source(&info);
 }
 
+// a private video only source showing source (takes the reference to source)
+static obs_source_t *wrap_video_only(const QString &name, obs_source_t *source)
+{
+	obs_source_t *wrapper = obs_source_create_private(VIDEO_ONLY_ID, QT_TO_UTF8(name), nullptr);
+	if (!wrapper)
+		return source;
+	static_cast<video_only_data *>(obs_obj_get_data(wrapper))->child = source;
+	return wrapper;
+}
+
 // One scene: that scene. Several: a private scene with them layered, the top of the list on top.
 // Without Include Audio it is wrapped in a video only source.
 obs_source_t *DownstreamKeyer::BuildSetSource(const QStringList &scenes)
@@ -589,11 +576,7 @@ obs_source_t *DownstreamKeyer::BuildSetSource(const QStringList &scenes)
 	}
 	if (!source || includeAudio)
 		return source;
-	obs_source_t *wrapper = obs_source_create_private(VIDEO_ONLY_ID, QT_TO_UTF8(name), nullptr);
-	if (!wrapper)
-		return source;
-	static_cast<video_only_data *>(obs_obj_get_data(wrapper))->child = source; // takes the reference
-	return wrapper;
+	return wrap_video_only(name, source);
 }
 
 void DownstreamKeyer::SetIncludeAudio(bool include)
@@ -611,8 +594,8 @@ void DownstreamKeyer::SetIncludeAudio(bool include)
 	if (IsPreviewing()) {
 		obs_source_release(previewSource);
 		previewSource = BuildSetSource(previewScenes);
-		AttachPreview();
 	}
+	UpdatePreviewOverlay(true);
 }
 
 // Make scenes the live scenes and put them on the output. source, when set, is the ready made source for them.
@@ -647,7 +630,6 @@ void DownstreamKeyer::ScenesChecked()
 			previewScenes = checked;
 			obs_source_release(previewSource);
 			previewSource = BuildSetSource(checked);
-			AttachPreview();
 		}
 	}
 	UpdateTally();
@@ -681,8 +663,6 @@ void DownstreamKeyer::Save(obs_data_t *data)
 	obs_data_set_string(data, "hide_transition", hideTransition ? obs_source_get_name(hideTransition) : "");
 	obs_data_set_int(data, "hide_transition_duration", hideTransitionDuration);
 	obs_data_set_int(data, "hide_after", hideAfter);
-	obs_data_set_bool(data, "tie", sceneChangeMode == sceneChangeOn);
-	obs_data_set_int(data, "scene_change_mode", sceneChangeMode);
 	obs_data_set_bool(data, "include_audio", includeAudio);
 	obs_data_array_t *sceneArray = obs_data_array_create();
 	for (int i = 0; i < scenesList->count(); i++) {
@@ -718,13 +698,6 @@ void DownstreamKeyer::Save(obs_data_t *data)
 	obs_data_array_t *ph = obs_hotkey_save(preview_hotkey_id);
 	obs_data_set_array(data, "preview_hotkey", ph);
 	obs_data_array_release(ph);
-	obs_data_array_t *eth = nullptr;
-	obs_data_array_t *dth = nullptr;
-	obs_hotkey_pair_save(tie_hotkey_id, &eth, &dth);
-	obs_data_set_array(data, "enable_tie_hotkey", eth);
-	obs_data_set_array(data, "disable_tie_hotkey", dth);
-	obs_data_array_release(eth);
-	obs_data_array_release(dth);
 	auto excludes = obs_data_array_create();
 	for (auto t : exclude_scenes) {
 		const auto obj = obs_data_create();
@@ -849,54 +822,99 @@ int DownstreamKeyer::GetHideAfter()
 	return hideAfter;
 }
 
-// Exclude Scene, or Load On Scene with a scene that is not listed
-bool DownstreamKeyer::IsHiddenOn(const std::string &scene)
+SceneChangeContext DownstreamKeyer::GetContext(const std::string &scene, bool forPreview)
 {
-	if (exclude_scenes.find(scene) != exclude_scenes.end())
-		return true;
-	return !load_scenes.empty() && load_scenes.find(scene) == load_scenes.end();
+	return contextProvider ? contextProvider(scene, forPreview) : SceneChangeContext();
+}
+
+// Load On Scene: the last live scenes, or the first scene in the list
+QStringList DownstreamKeyer::AutoLoadScenes()
+{
+	auto scenes = InListOrder(lastLiveScenes);
+	if (scenes.isEmpty() && scenesList->count() > 0)
+		scenes.append(scenesList->item(0)->text());
+	return scenes;
+}
+
+// are the live scenes on the output right now (not hidden by an excluded or unlisted program scene)
+bool DownstreamKeyer::IsLiveOnOutput()
+{
+	if (!liveSource)
+		return false;
+	obs_source_t *current = view     ? obs_view_get_source(view, outputChannel)
+				: canvas ? obs_canvas_get_channel(canvas, outputChannel)
+					 : obs_get_output_source(outputChannel);
+	if (current && obs_source_get_type(current) == OBS_SOURCE_TYPE_TRANSITION) {
+		obs_source_t *active = obs_transition_get_active_source(current);
+		obs_source_release(current);
+		current = active;
+	}
+	const bool on = current == liveSource;
+	obs_source_release(current);
+	return on;
 }
 
 void DownstreamKeyer::SceneChanged(std::string scene)
 {
+	SceneChanged(scene, GetContext(scene, false));
+}
+
+void DownstreamKeyer::SceneChanged(const std::string &scene, const SceneChangeContext &ctx)
+{
 	const bool previewTake = IsPreviewTakeTo(scene);
 
-	if (IsHiddenOn(scene)) {
+	// Hold Keyers: nothing changes. A cue still rides in with the scene and goes live when the transition ends.
+	if (ctx.hold)
+		return;
+
+	if (IsSceneExcluded(scene.c_str())) {
 		// the live scenes are kept, they come back on the next scene the keyer is shown on
-		if (previewTake)
+		if (previewTake) {
+			RemoveOverlay(true);
 			ClearPreview();
+		}
 		apply_source(nullptr);
 		return;
 	}
 
-	// the previewed scenes go on program inside the scene, and on the keyer output when the transition ends
+	// the cued scenes go on program inside the scene, and on the keyer output when the transition ends
 	if (previewTake)
 		return;
 
-	if (sceneChangeMode == sceneChangeOff) {
+	const bool listed = IsLoadedOn(scene);
+
+	// Keyer Off at Scene Change, or another keyer's cue is taken: only Load On Scene keyers of this scene stay
+	if (ctx.clearOthers && !listed) {
 		KeyerOff();
 		return;
 	}
 
-	// A listed program scene went live and nothing is live (it was turned off, or Hide After ran):
-	// load the last live scenes, or the first scene in the list.
-	if (!load_scenes.empty() && liveScenes.isEmpty() && scenesList->count() > 0) {
-		auto scenes = InListOrder(lastLiveScenes);
-		if (scenes.isEmpty())
-			scenes.append(scenesList->item(0)->text());
-		SetLiveScenes(scenes);
+	// Load On Scene, not a listed scene: off for now, the live scenes come back on a listed scene
+	if (!load_scenes.empty() && !listed) {
+		apply_source(nullptr);
+		return;
 	}
 
-	if (sceneChangeMode == sceneChangeOn) {
-		const auto checked = CheckedScenes();
-		if (!checked.isEmpty() && checked != liveScenes) {
-			SetLiveScenes(checked);
-			return;
-		}
+	// a listed scene and nothing live (turned off, or Hide After ran): load the last live scenes again
+	if (listed && liveScenes.isEmpty()) {
+		SetLiveScenes(AutoLoadScenes());
+		return;
 	}
 
 	// puts the live scenes back after an excluded scene, nothing changes if they are already on
 	apply_live_source();
+}
+
+void DownstreamKeyer::SyncToProgramScene(const std::string &scene)
+{
+	if (IsLoadedOn(scene) && !IsSceneExcluded(scene.c_str())) {
+		if (liveScenes.isEmpty())
+			SetLiveScenes(AutoLoadScenes());
+		else
+			apply_live_source();
+		return;
+	}
+	KeyerOff();
 }
 
 void DownstreamKeyer::Load(obs_data_t *data)
@@ -908,10 +926,6 @@ void DownstreamKeyer::Load(obs_data_t *data)
 	SetTransition(obs_data_get_string(data, "hide_transition"), transitionType::hide);
 	hideTransitionDuration = obs_data_get_int(data, "hide_transition_duration");
 	hideAfter = obs_data_get_int(data, "hide_after");
-	if (obs_data_has_user_value(data, "scene_change_mode"))
-		sceneChangeMode = (int)obs_data_get_int(data, "scene_change_mode");
-	else
-		sceneChangeMode = obs_data_get_bool(data, "tie") ? sceneChangeOn : sceneChangeNone;
 	includeAudio = obs_data_get_bool(data, "include_audio");
 
 	// live scenes: this version saves a list, earlier versions the one scene that was on the output
@@ -990,11 +1004,6 @@ void DownstreamKeyer::Load(obs_data_t *data)
 	obs_data_array_t *ph = obs_data_get_array(data, "preview_hotkey");
 	obs_hotkey_load(preview_hotkey_id, ph);
 	obs_data_array_release(ph);
-	obs_data_array_t *eth = obs_data_get_array(data, "enable_tie_hotkey");
-	obs_data_array_t *dth = obs_data_get_array(data, "disable_tie_hotkey");
-	obs_hotkey_pair_load(tie_hotkey_id, eth, dth);
-	obs_data_array_release(eth);
-	obs_data_array_release(dth);
 
 	auto excludes = obs_data_get_array(data, "exclude_scenes");
 	exclude_scenes.clear();
@@ -1121,32 +1130,6 @@ void DownstreamKeyer::null_hotkey(void *data, obs_hotkey_id id, obs_hotkey_t *ho
 	QMetaObject::invokeMethod(downstreamKeyer, "KeyerOff", Qt::QueuedConnection);
 }
 
-// the tie hotkeys switch Transition On with Scene Change on and off
-bool DownstreamKeyer::enable_tie_hotkey(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed)
-{
-	UNUSED_PARAMETER(id);
-	UNUSED_PARAMETER(hotkey);
-	if (!pressed)
-		return false;
-	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
-	if (downstreamKeyer->sceneChangeMode == sceneChangeOn)
-		return false;
-	QMetaObject::invokeMethod(downstreamKeyer, [downstreamKeyer]() { downstreamKeyer->SetTie(true); }, Qt::QueuedConnection);
-	return true;
-}
-bool DownstreamKeyer::disable_tie_hotkey(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed)
-{
-	UNUSED_PARAMETER(id);
-	UNUSED_PARAMETER(hotkey);
-	if (!pressed)
-		return false;
-	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
-	if (downstreamKeyer->sceneChangeMode != sceneChangeOn)
-		return false;
-	QMetaObject::invokeMethod(downstreamKeyer, [downstreamKeyer]() { downstreamKeyer->SetTie(false); }, Qt::QueuedConnection);
-	return true;
-}
-
 void DownstreamKeyer::go_live_hotkey(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed)
 {
 	UNUSED_PARAMETER(id);
@@ -1196,6 +1179,7 @@ void DownstreamKeyer::AddExcludeScene(const char *scene_name)
 	exclude_scenes.emplace(scene_name);
 	if (GetProgramSceneName() == scene_name)
 		SceneChanged(scene_name);
+	UpdatePreviewOverlay();
 }
 
 void DownstreamKeyer::RemoveExcludeScene(const char *scene_name)
@@ -1203,6 +1187,7 @@ void DownstreamKeyer::RemoveExcludeScene(const char *scene_name)
 	exclude_scenes.erase(scene_name);
 	if (GetProgramSceneName() == scene_name)
 		SceneChanged(scene_name);
+	UpdatePreviewOverlay();
 }
 
 bool DownstreamKeyer::IsSceneExcluded(const char *scene_name)
@@ -1216,6 +1201,7 @@ void DownstreamKeyer::AddLoadScene(const char *scene_name)
 		return;
 	// the list affects every scene (not just this one), so always re-evaluate
 	SceneChanged(GetProgramSceneName());
+	UpdatePreviewOverlay();
 }
 
 void DownstreamKeyer::RemoveLoadScene(const char *scene_name)
@@ -1223,6 +1209,7 @@ void DownstreamKeyer::RemoveLoadScene(const char *scene_name)
 	if (!scene_name || !load_scenes.erase(scene_name))
 		return;
 	SceneChanged(GetProgramSceneName());
+	UpdatePreviewOverlay();
 }
 
 bool DownstreamKeyer::IsLoadScene(const char *scene_name)
@@ -1332,19 +1319,6 @@ bool DownstreamKeyer::RemoveScene(QString scene_name)
 	return false;
 }
 
-void DownstreamKeyer::SetTie(bool tie)
-{
-	SetSceneChangeMode(tie ? sceneChangeOn : sceneChangeNone);
-}
-
-void DownstreamKeyer::SetSceneChangeMode(int mode)
-{
-	if (mode < sceneChangeNone || mode > sceneChangeOff)
-		mode = sceneChangeNone;
-	sceneChangeMode = mode;
-	UpdateButtons();
-}
-
 void DownstreamKeyer::SetOutputChannel(int oc)
 {
 	if (oc == outputChannel)
@@ -1387,7 +1361,7 @@ void DownstreamKeyer::SetOutputChannel(int oc)
 
 // ---- Go Live and Go to Preview ----
 
-static obs_source_t *get_main_program_scene()
+obs_source_t *dsk_get_main_program_scene()
 {
 	obs_source_t *source = obs_get_output_source(0);
 	while (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
@@ -1450,6 +1424,40 @@ void dsk_purge_preview_items()
 	obs_frontend_source_list_free(&scenes);
 }
 
+static std::atomic<bool> program_transition_active{false};
+
+void dsk_set_program_transition_active(bool active)
+{
+	program_transition_active = active;
+}
+
+// stack the preview items of all keyers by output channel, like the keyer outputs are stacked
+static void sort_preview_items(obs_source_t *scene_source)
+{
+	obs_scene_t *scene = obs_scene_from_source(scene_source);
+	if (!scene)
+		return;
+	std::vector<std::pair<long long, obs_sceneitem_t *>> items;
+	obs_scene_enum_items(
+		scene,
+		[](obs_scene_t *, obs_sceneitem_t *item, void *param) {
+			auto list = static_cast<std::vector<std::pair<long long, obs_sceneitem_t *>> *>(param);
+			obs_data_t *priv = obs_sceneitem_get_private_settings(item);
+			if (obs_data_get_bool(priv, "dsk_preview")) {
+				obs_sceneitem_addref(item);
+				list->emplace_back(obs_data_get_int(priv, "dsk_preview_channel"), item);
+			}
+			obs_data_release(priv);
+			return true;
+		},
+		&items);
+	std::stable_sort(items.begin(), items.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+	for (auto &i : items) {
+		obs_sceneitem_set_order(i.second, OBS_ORDER_MOVE_TOP);
+		obs_sceneitem_release(i.second);
+	}
+}
+
 bool DownstreamKeyer::PreviewSupported()
 {
 	// studio mode only exists for the main OBS output
@@ -1458,7 +1466,7 @@ bool DownstreamKeyer::PreviewSupported()
 
 void DownstreamKeyer::GoLive()
 {
-	// a running preview is what goes live, otherwise the checked scenes
+	// a cued preview is what goes live, otherwise the checked scenes
 	if (IsPreviewing()) {
 		const auto scenes = previewScenes;
 		obs_source_t *source = obs_source_get_ref(previewSource);
@@ -1484,115 +1492,170 @@ void DownstreamKeyer::TogglePreview()
 	previewScenes = checked;
 	obs_source_release(previewSource);
 	previewSource = BuildSetSource(checked);
-	AttachPreview();
 	UpdateTally();
 }
 
-void DownstreamKeyer::AttachPreview()
+// What this keyer shows after a program transition to scene, the same way SceneChanged works it out.
+QStringList DownstreamKeyer::PredictedScenes(const std::string &scene, const SceneChangeContext &ctx)
 {
-	RemovePreviewItems(false);
-	obs_weak_source_release(previewTarget);
-	previewTarget = nullptr;
-	obs_weak_source_release(previewProgramAtAttach);
-	previewProgramAtAttach = nullptr;
-	if (!previewSource)
-		return;
+	const bool excluded = IsSceneExcluded(scene.c_str());
+	if (IsPreviewing())
+		return excluded ? QStringList() : previewScenes;
+	if (ctx.hold)
+		return IsLiveOnOutput() ? liveScenes : QStringList();
+	if (excluded)
+		return {};
+	const bool listed = IsLoadedOn(scene);
+	if (ctx.clearOthers && !listed)
+		return {};
+	if (!load_scenes.empty() && !listed)
+		return {};
+	if (listed && liveScenes.isEmpty())
+		return AutoLoadScenes();
+	return liveScenes;
+}
 
-	obs_source_t *previewScene = obs_frontend_get_current_preview_scene();
-	obs_source_t *program = get_main_program_scene();
-	obs_scene_t *scene = obs_scene_from_source(previewScene);
-	// never add to the scene that is on program right now, that would put the keyer scenes on air
-	if (scene && previewScene != program && previewSource != previewScene) {
-		obs_sceneitem_t *item = obs_scene_add(scene, previewSource);
-		if (item) {
-			obs_data_t *priv = obs_sceneitem_get_private_settings(item);
-			obs_data_set_bool(priv, "dsk_preview", true);
-			obs_data_set_string(priv, "dsk_preview_owner", previewToken.c_str());
-			obs_data_release(priv);
-			obs_sceneitem_set_locked(item, true);
-			previewTarget = obs_source_get_weak_source(previewScene);
-		}
+void DownstreamKeyer::UpdatePreviewOverlay(bool force)
+{
+	if (!PreviewSupported() || program_transition_active)
+		return;
+	obs_source_t *previewScene = obs_frontend_preview_program_mode_active() ? obs_frontend_get_current_preview_scene()
+										: nullptr;
+	const QStringList next = previewScene ? PredictedScenes(obs_source_get_name(previewScene),
+								GetContext(obs_source_get_name(previewScene), true))
+					      : QStringList();
+	// reuse the cued or live source when the overlay shows exactly that
+	obs_source_t *wanted = IsPreviewing() ? previewSource : (next == liveScenes ? liveSource : nullptr);
+
+	obs_source_t *considered = obs_weak_source_get_source(overlayPreviewScene);
+	const bool unchanged = !force && considered == previewScene && next == overlayScenes && (!wanted || wanted == overlayChild);
+	obs_source_release(considered);
+	if (unchanged) {
+		obs_source_release(previewScene);
+		return;
 	}
-	if (program)
-		previewProgramAtAttach = obs_source_get_weak_source(program);
-	obs_source_release(program);
+
+	RemoveOverlay(false);
+	if (previewScene && !next.isEmpty()) {
+		overlayScenes = next;
+		overlayPreviewScene = obs_source_get_weak_source(previewScene);
+		overlayChild = wanted ? obs_source_get_ref(wanted) : BuildSetSource(next);
+
+		obs_source_t *program = dsk_get_main_program_scene();
+		obs_scene_t *scene = obs_scene_from_source(previewScene);
+		// never add to the scene that is on program right now, that would put the keyer scenes on air
+		if (scene && overlayChild && previewScene != program && overlayChild != previewScene) {
+			QString name = QT_UTF8(obs_module_text("DownstreamKeyer"));
+			name += " ";
+			name += objectName();
+			// always video only and private, so a saved scene collection never keeps a real scene item
+			obs_source_t *itemSource = wrap_video_only(name, obs_source_get_ref(overlayChild));
+			obs_sceneitem_t *item = obs_scene_add(scene, itemSource);
+			obs_source_release(itemSource);
+			if (item) {
+				obs_data_t *priv = obs_sceneitem_get_private_settings(item);
+				obs_data_set_bool(priv, "dsk_preview", true);
+				obs_data_set_string(priv, "dsk_preview_owner", previewToken.c_str());
+				obs_data_set_int(priv, "dsk_preview_channel", outputChannel);
+				obs_data_release(priv);
+				obs_sceneitem_set_locked(item, true);
+				overlayTarget = obs_source_get_weak_source(previewScene);
+				sort_preview_items(previewScene);
+			}
+		}
+		if (program)
+			overlayProgramAtAttach = obs_source_get_weak_source(program);
+		obs_source_release(program);
+	}
 	obs_source_release(previewScene);
 }
 
-void DownstreamKeyer::RemovePreviewItems(bool everywhere)
+void DownstreamKeyer::RemoveOverlay(bool everywhere)
 {
-	obs_source_t *target = obs_weak_source_get_source(previewTarget);
+	obs_source_t *target = obs_weak_source_get_source(overlayTarget);
 	if (target)
 		dsk_remove_preview_items(target, previewToken.c_str());
 	obs_source_release(target);
-	if (!everywhere)
-		return;
-	// with scene duplication the program scene is a copy that carries the item as well
-	obs_source_t *program = get_main_program_scene();
-	if (program)
-		dsk_remove_preview_items(program, previewToken.c_str());
-	obs_source_release(program);
-	struct obs_frontend_source_list scenes = {};
-	obs_frontend_get_scenes(&scenes);
-	for (size_t i = 0; i < scenes.sources.num; i++)
-		dsk_remove_preview_items(scenes.sources.array[i], previewToken.c_str());
-	obs_frontend_source_list_free(&scenes);
+	if (everywhere) {
+		// with scene duplication the program scene is a copy that carries the item as well
+		obs_source_t *program = dsk_get_main_program_scene();
+		if (program)
+			dsk_remove_preview_items(program, previewToken.c_str());
+		obs_source_release(program);
+		struct obs_frontend_source_list scenes = {};
+		obs_frontend_get_scenes(&scenes);
+		for (size_t i = 0; i < scenes.sources.num; i++)
+			dsk_remove_preview_items(scenes.sources.array[i], previewToken.c_str());
+		obs_frontend_source_list_free(&scenes);
+	}
+	obs_weak_source_release(overlayTarget);
+	overlayTarget = nullptr;
+	obs_weak_source_release(overlayPreviewScene);
+	overlayPreviewScene = nullptr;
+	obs_weak_source_release(overlayProgramAtAttach);
+	overlayProgramAtAttach = nullptr;
+	obs_source_release(overlayChild);
+	overlayChild = nullptr;
+	overlayScenes.clear();
 }
 
 void DownstreamKeyer::ClearPreview()
 {
-	if (!IsPreviewing() && !previewTarget && !previewSource) {
+	if (!IsPreviewing() && !previewSource) {
 		UpdateButtons();
 		return;
 	}
-	RemovePreviewItems(false);
-	obs_weak_source_release(previewTarget);
-	previewTarget = nullptr;
-	obs_weak_source_release(previewProgramAtAttach);
-	previewProgramAtAttach = nullptr;
 	obs_source_release(previewSource);
 	previewSource = nullptr;
 	previewScenes.clear();
-	UpdateTally();
+	UpdateTally(); // the overlay goes back to what the keyer shows without a cue
 }
 
 void DownstreamKeyer::StudioModeChanged()
 {
 	if (!obs_frontend_preview_program_mode_active())
 		ClearPreview();
+	UpdatePreviewOverlay(true);
 	UpdateButtons();
 }
 
 void DownstreamKeyer::PreviewSceneChanged()
 {
-	if (!IsPreviewing())
-		return;
-	// with "swap scenes" the preview changes at the end of the transition that took the preview scene live
+	// with "swap scenes" the preview changes at the end of the transition that took the cue live
 	CheckPreviewTake();
-	if (!IsPreviewing())
-		return;
-	AttachPreview();
-	UpdateTally();
+	UpdatePreviewOverlay();
 }
 
-// is the program transition to scene taking the previewed keyer scenes live
+// is the program transition to scene taking the cued keyer scenes live
 bool DownstreamKeyer::IsPreviewTakeTo(const std::string &scene)
 {
-	if (!IsPreviewing() || !previewTarget)
+	if (!IsPreviewing() || !overlayTarget)
 		return false;
-	obs_source_t *target = obs_weak_source_get_source(previewTarget);
+	obs_source_t *target = obs_weak_source_get_source(overlayTarget);
 	const bool take = target && scene == obs_source_get_name(target);
 	obs_source_release(target);
 	return take;
 }
 
-void DownstreamKeyer::CheckPreviewTake()
+void DownstreamKeyer::ProgramTransitionStarting(obs_source_t *dest)
 {
-	if (!IsPreviewing() || !previewTarget || main_transition_running())
+	if (!PreviewSupported() || !dest)
 		return;
-	obs_source_t *program = get_main_program_scene();
-	obs_source_t *target = obs_weak_source_get_source(previewTarget);
-	obs_source_t *programAtAttach = obs_weak_source_get_source(previewProgramAtAttach);
+	// a cue rides in with the scene and moves to the keyer output when the transition ends
+	if (IsPreviewTakeTo(obs_source_get_name(dest)))
+		return;
+	// anything else is shown by the keyer output itself, so take the preview copy out before it is drawn twice
+	dsk_remove_preview_items(dest, previewToken.c_str());
+	RemoveOverlay(false);
+}
+
+void DownstreamKeyer::CheckPreviewTake(bool transitionEnded)
+{
+	if (!IsPreviewing() || !overlayTarget || (!transitionEnded && main_transition_running()))
+		return;
+	obs_source_t *program = dsk_get_main_program_scene();
+	obs_source_t *target = obs_weak_source_get_source(overlayTarget);
+	obs_source_t *programAtAttach = obs_weak_source_get_source(overlayProgramAtAttach);
 	// a new program scene (a copy of it with scene duplication) with the name of the previewed scene
 	const bool taken = program && target && program != programAtAttach &&
 			   strcmp(obs_source_get_name(program), obs_source_get_name(target)) == 0;
@@ -1603,19 +1666,19 @@ void DownstreamKeyer::CheckPreviewTake()
 	if (!taken)
 		return;
 
-	if (IsHiddenOn(programName)) {
-		RemovePreviewItems(true);
+	if (IsSceneExcluded(programName.c_str())) {
+		RemoveOverlay(true);
 		ClearPreview();
 		return;
 	}
 
-	// The keyer scenes went on program inside the scene. Put the same source on the keyer output without a
+	// The cued scenes went on program inside the scene. Put the same picture on the keyer output without a
 	// transition, so it looks the same, then take the scene item out. Hide After starts now.
 	const auto scenes = previewScenes;
 	obs_source_t *source = obs_source_get_ref(previewSource);
 	SetLiveScenes(scenes, source, false);
 	obs_source_release(source);
-	RemovePreviewItems(true);
+	RemoveOverlay(true);
 	ClearPreview();
 }
 
@@ -1640,11 +1703,25 @@ void DownstreamKeyer::UpdateTally()
 	}
 	scenesList->viewport()->update();
 	UpdateButtons();
+	// what this keyer shows can change what the other keyers show on the preview (a cue clears them), so the
+	// dock refreshes every keyer's preview
+	if (stateChanged)
+		stateChanged();
+	else
+		UpdatePreviewOverlay();
+}
+
+void DownstreamKeyer::SetTransitionKeyersEnabled(bool enabled)
+{
+	transitionKeyersButton->setEnabled(enabled);
+	transitionKeyersButton->setStyleSheet(enabled ? "background-color: #1b5e20; color: white; font-weight: bold;" : "");
 }
 
 void DownstreamKeyer::UpdateButtons()
 {
-	previewButton->setVisible(PreviewSupported() && obs_frontend_preview_program_mode_active());
+	const bool studio = PreviewSupported() && obs_frontend_preview_program_mode_active();
+	previewButton->setVisible(studio);
+	transitionKeyersButton->setVisible(studio);
 
 	const bool previewing = IsPreviewing();
 	const auto armed = previewing ? previewScenes : CheckedScenes();
@@ -1653,9 +1730,6 @@ void DownstreamKeyer::UpdateButtons()
 	goLiveButton->setStyleSheet(goLiveArmed ? "background-color: #b71c1c; color: white; font-weight: bold;" : "");
 	previewButton->setChecked(previewing);
 	previewButton->setStyleSheet(previewing ? "background-color: #1b5e20; color: white; font-weight: bold;" : "");
-
-	changeOnButton->setChecked(sceneChangeMode == sceneChangeOn);
-	changeOffButton->setChecked(sceneChangeMode == sceneChangeOff);
 }
 
 LockedCheckBox::LockedCheckBox()
