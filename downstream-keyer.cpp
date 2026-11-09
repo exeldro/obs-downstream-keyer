@@ -1,22 +1,41 @@
 #include "downstream-keyer.hpp"
 
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSpinBox>
+#include <QStyledItemDelegate>
 #include <QToolBar>
 #include <QVBoxLayout>
 #include <obs-frontend-api.h>
 
 #include "obs-module.h"
+#include <vector>
 
 #define QT_UTF8(str) QString::fromUtf8(str)
 #define QT_TO_UTF8(str) str.toUtf8().constData()
 
 extern obs_websocket_vendor vendor;
+
+// draws the scene check box on the right side of the scene name
+class RightCheckBoxDelegate : public QStyledItemDelegate {
+public:
+	using QStyledItemDelegate::QStyledItemDelegate;
+
+protected:
+	void initStyleOption(QStyleOptionViewItem *option, const QModelIndex &index) const override
+	{
+		QStyledItemDelegate::initStyleOption(option, index);
+		option->direction = Qt::RightToLeft;
+		option->displayAlignment = Qt::AlignLeft | Qt::AlignAbsolute | Qt::AlignVCenter;
+	}
+};
 
 DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_canvas_t *c, get_transitions_callback_t gt,
 				 void *gtd)
@@ -52,9 +71,58 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_c
 	scenesList->setDragEnabled(true);
 	scenesList->setDragDropMode(QAbstractItemView::InternalMove);
 	scenesList->setDefaultDropAction(Qt::TargetMoveAction);
-	connect(scenesList, SIGNAL(itemSelectionChanged()), this, SLOT(on_scenesList_itemSelectionChanged()));
+	scenesList->setItemDelegate(new RightCheckBoxDelegate(scenesList));
+	connect(scenesList, &QListWidget::itemChanged, this, [this](QListWidgetItem *) { ScenesChecked(); });
+	connect(scenesList->model(), &QAbstractItemModel::rowsMoved, this, [this]() { ScenesChecked(); });
 
-	layout->addWidget(scenesList);
+	previewToken = QString::number(reinterpret_cast<quintptr>(this), 16).toStdString();
+
+	auto row = new QHBoxLayout;
+	row->setSpacing(0);
+	row->setContentsMargins(0, 0, 0, 0);
+	row->addWidget(scenesList);
+
+	sideColumn = new QWidget(this);
+	auto column = new QVBoxLayout(sideColumn);
+	column->setContentsMargins(4, 4, 4, 4);
+	column->setSpacing(4);
+
+	goLiveButton = new QPushButton(QT_UTF8(obs_module_text("GoLive")), sideColumn);
+	goLiveButton->setObjectName(QStringLiteral("dskGoLive"));
+	connect(goLiveButton, &QPushButton::clicked, this, &DownstreamKeyer::GoLive);
+	column->addWidget(goLiveButton);
+
+	previewButton = new QPushButton(QT_UTF8(obs_module_text("GoToPreview")), sideColumn);
+	previewButton->setObjectName(QStringLiteral("dskGoToPreview"));
+	previewButton->setCheckable(true);
+	connect(previewButton, &QPushButton::clicked, this, &DownstreamKeyer::TogglePreview);
+	column->addWidget(previewButton);
+
+	keyerOffButton = new QPushButton(QT_UTF8(obs_module_text("KeyerOff")), sideColumn);
+	keyerOffButton->setObjectName(QStringLiteral("dskKeyerOff"));
+	connect(keyerOffButton, &QPushButton::clicked, this, &DownstreamKeyer::KeyerOff);
+	column->addWidget(keyerOffButton);
+
+	column->addSpacing(8);
+
+	auto sceneChangeGroup = new QButtonGroup(sideColumn);
+	sceneChangeGroup->setExclusive(true);
+	auto addModeButton = [&](const char *text, int mode) {
+		auto b = new QPushButton(QT_UTF8(obs_module_text(text)).replace("\\n", "\n"), sideColumn);
+		b->setCheckable(true);
+		sceneChangeGroup->addButton(b, mode);
+		column->addWidget(b);
+		connect(b, &QPushButton::clicked, this, [this, mode]() { SetSceneChangeMode(mode); });
+		return b;
+	};
+	changeOnButton = addModeButton("SceneChangeOn", sceneChangeOn);
+	changeOffButton = addModeButton("SceneChangeOff", sceneChangeOff);
+	changeNoneButton = addModeButton("SceneChangeNone", sceneChangeNone);
+
+	column->addStretch();
+	row->addWidget(sideColumn);
+
+	layout->addLayout(row);
 
 	scenesToolbar = new QToolBar(this);
 	scenesToolbar->setObjectName(QStringLiteral("scenesToolbar"));
@@ -96,23 +164,6 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_c
 	connect(actionSceneDown, SIGNAL(triggered()), this, SLOT(on_actionSceneDown_triggered()));
 	scenesToolbar->addAction(actionSceneDown);
 
-	scenesToolbar->addSeparator();
-
-	auto actionSceneNull = new QAction(this);
-	actionSceneNull->setObjectName(QStringLiteral("actionSceneNull"));
-	actionSceneNull->setProperty("themeID", "pauseIconSmall");
-	actionSceneNull->setProperty("class", "icon-media-pause");
-	actionSceneNull->setText(QT_UTF8(obs_module_text("None")));
-	connect(actionSceneNull, SIGNAL(triggered()), this, SLOT(on_actionSceneNull_triggered()));
-	scenesToolbar->addAction(actionSceneNull);
-
-	scenesToolbar->addSeparator();
-
-	tie = new LockedCheckBox(this);
-	tie->setObjectName(QStringLiteral("tie"));
-	tie->setToolTip(QT_UTF8(obs_module_text("Tie")));
-	scenesToolbar->addWidget(tie);
-
 	// Themes need the QAction dynamic properties
 	for (QAction *x : scenesToolbar->actions()) {
 		QWidget *temp = scenesToolbar->widgetForAction(x);
@@ -148,10 +199,23 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_c
 							  QT_TO_UTF8(disableTieHotkeyName), QT_TO_UTF8(disableTieHotkeyName),
 							  enable_tie_hotkey, disable_tie_hotkey, this, this);
 
+	QString goLiveHotkeyName = QT_UTF8(obs_module_text("GoLive"));
+	goLiveHotkeyName += " ";
+	goLiveHotkeyName += name;
+	go_live_hotkey_id =
+		obs_hotkey_register_frontend(QT_TO_UTF8(goLiveHotkeyName), QT_TO_UTF8(goLiveHotkeyName), go_live_hotkey, this);
+	QString previewHotkeyName = QT_UTF8(obs_module_text("GoToPreview"));
+	previewHotkeyName += " ";
+	previewHotkeyName += name;
+	preview_hotkey_id =
+		obs_hotkey_register_frontend(QT_TO_UTF8(previewHotkeyName), QT_TO_UTF8(previewHotkeyName), preview_hotkey, this);
+
 	connect(&hideTimer, &QTimer::timeout, [this]() {
 		hideTimer.stop();
-		on_actionSceneNull_triggered();
+		KeyerOff();
 	});
+
+	UpdateButtons();
 }
 
 DownstreamKeyer::~DownstreamKeyer()
@@ -165,6 +229,18 @@ DownstreamKeyer::~DownstreamKeyer()
 	}
 	obs_hotkey_unregister(null_hotkey_id);
 	obs_hotkey_pair_unregister(tie_hotkey_id);
+	obs_hotkey_unregister(go_live_hotkey_id);
+	obs_hotkey_unregister(preview_hotkey_id);
+
+	RemovePreviewItems(false);
+	obs_weak_source_release(previewTarget);
+	previewTarget = nullptr;
+	obs_weak_source_release(previewProgramAtAttach);
+	previewProgramAtAttach = nullptr;
+	obs_source_release(previewSource);
+	previewSource = nullptr;
+	obs_source_release(liveSource);
+	liveSource = nullptr;
 
 	if (transition) {
 		obs_transition_clear(transition);
@@ -189,6 +265,7 @@ DownstreamKeyer::~DownstreamKeyer()
 	const auto sh = obs_get_signal_handler();
 	signal_handler_disconnect(sh, "source_rename", source_rename, this);
 	signal_handler_disconnect(sh, "source_remove", source_remove, this);
+	scenesList->blockSignals(true);
 	while (scenesList->count()) {
 		const auto item = scenesList->item(0);
 		scenesList->removeItemWidget(item);
@@ -257,6 +334,7 @@ void DownstreamKeyer::on_actionRemoveScene_triggered()
 	scenesList->removeItemWidget(item);
 	obs_hotkey_pair_unregister(item->data(Qt::UserRole).toUInt());
 	delete item;
+	ScenesChecked();
 }
 
 void DownstreamKeyer::on_actionSceneUp_triggered()
@@ -271,14 +349,32 @@ void DownstreamKeyer::on_actionSceneDown_triggered()
 
 void DownstreamKeyer::on_actionSceneNull_triggered()
 {
-	for (int i = 0; i < scenesList->count(); i++) {
-		auto item = scenesList->item(i);
-		item->setSelected(false);
-	}
-	scenesList->setCurrentRow(-1);
+	KeyerOff();
 }
 
-void DownstreamKeyer::apply_source(obs_source_t *const newSource)
+void DownstreamKeyer::KeyerOff()
+{
+	// only the output goes off: the checked scenes and any preview stay
+	hideTimer.stop();
+	liveScenes.clear();
+	obs_source_release(liveSource);
+	liveSource = nullptr;
+	apply_source(nullptr);
+	UpdateTally();
+}
+
+void DownstreamKeyer::set_output(obs_source_t *source)
+{
+	if (view) {
+		obs_view_set_source(view, outputChannel, source);
+	} else if (canvas) {
+		obs_canvas_set_channel(canvas, outputChannel, source);
+	} else {
+		obs_set_output_source(outputChannel, source);
+	}
+}
+
+void DownstreamKeyer::apply_source(obs_source_t *const newSource, bool useTransition)
 {
 	if (newSource && hideAfter > 0) {
 		hideTimer.stop();
@@ -321,37 +417,27 @@ void DownstreamKeyer::apply_source(obs_source_t *const newSource)
 		} else if (transition)
 			newTransition = transition;
 	}
+	if (!useTransition)
+		newTransition = nullptr;
 	if (prevSource == newSource) {
 		//skip if nothing changed
 	} else {
 		if (!newTransition) {
-			if (view) {
-				obs_view_set_source(view, outputChannel, newSource);
-			} else if (canvas) {
-				obs_canvas_set_channel(canvas, outputChannel, newSource);
-			} else {
-				obs_set_output_source(outputChannel, newSource);
-			}
+			set_output(newSource);
 		} else {
 			obs_transition_set(newTransition, prevSource);
 
 			obs_transition_start(newTransition, OBS_TRANSITION_MODE_AUTO, newTransitionDuration, newSource);
 
 			if (prevTransition != newTransition) {
-				if (view) {
-					obs_view_set_source(view, outputChannel, newTransition);
-				} else if (canvas) {
-					obs_canvas_set_channel(canvas, outputChannel, newTransition);
-				} else {
-					obs_set_output_source(outputChannel, newTransition);
-				}
+				set_output(newTransition);
 			}
 		}
 		if (vendor) {
 			const auto data = obs_data_create();
 			obs_data_set_string(data, "dsk_name", QT_TO_UTF8(objectName()));
 			obs_data_set_int(data, "dsk_channel", outputChannel);
-			obs_data_set_string(data, "new_scene", newSource ? obs_source_get_name(newSource) : "");
+			obs_data_set_string(data, "new_scene", QT_TO_UTF8(liveScenes.join(", ")));
 			obs_data_set_string(data, "old_scene", prevSource ? obs_source_get_name(prevSource) : "");
 			obs_websocket_vendor_emit_event(vendor, "dsk_scene_changed", data);
 			obs_data_release(data);
@@ -362,27 +448,96 @@ void DownstreamKeyer::apply_source(obs_source_t *const newSource)
 	obs_source_release(prevTransition);
 }
 
-void DownstreamKeyer::apply_selected_source()
+void DownstreamKeyer::apply_live_source()
 {
-	const auto l = scenesList->selectedItems();
-	const auto newSource = l.count() ? (canvas ? obs_canvas_get_source_by_name(canvas, QT_TO_UTF8(l.value(0)->text()))
-						   : obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text())))
-					 : nullptr;
-
-	apply_source(newSource);
-	obs_source_release(newSource);
+	apply_source(liveSource);
 }
 
-void DownstreamKeyer::on_scenesList_itemSelectionChanged()
+obs_source_t *DownstreamKeyer::GetSourceByName(const QString &name)
 {
-	const auto selected = scenesList->selectedItems();
-	if (!selected.isEmpty())
-		lastSelectedScene = selected.first()->text();
+	if (name.isEmpty())
+		return nullptr;
+	return canvas ? obs_canvas_get_source_by_name(canvas, QT_TO_UTF8(name)) : obs_get_source_by_name(QT_TO_UTF8(name));
+}
 
-	if (tie->isChecked())
+QStringList DownstreamKeyer::CheckedScenes()
+{
+	QStringList checked;
+	for (int i = 0; i < scenesList->count(); i++) {
+		auto item = scenesList->item(i);
+		if (item && item->checkState() == Qt::Checked)
+			checked.append(item->text());
+	}
+	return checked;
+}
+
+QStringList DownstreamKeyer::InListOrder(const QStringList &scenes)
+{
+	QStringList ordered;
+	for (int i = 0; i < scenesList->count(); i++) {
+		auto item = scenesList->item(i);
+		if (item && scenes.contains(item->text()))
+			ordered.append(item->text());
+	}
+	return ordered;
+}
+
+// One scene: that scene. Several: a private scene with them layered, the top of the list on top.
+obs_source_t *DownstreamKeyer::BuildSetSource(const QStringList &scenes)
+{
+	if (scenes.isEmpty())
+		return nullptr;
+	if (scenes.size() == 1)
+		return GetSourceByName(scenes.first());
+	QString name = QT_UTF8(obs_module_text("DownstreamKeyer"));
+	name += " ";
+	name += objectName();
+	obs_scene_t *scene = obs_scene_create_private(QT_TO_UTF8(name));
+	for (auto it = scenes.crbegin(); it != scenes.crend(); ++it) {
+		obs_source_t *child = GetSourceByName(*it);
+		if (child)
+			obs_scene_add(scene, child);
+		obs_source_release(child);
+	}
+	return obs_scene_get_source(scene);
+}
+
+// Make scenes the live scenes and put them on the output. source, when set, is the ready made source for them.
+void DownstreamKeyer::SetLiveScenes(const QStringList &scenes, obs_source_t *source, bool useTransition)
+{
+	if (scenes.isEmpty()) {
+		KeyerOff();
 		return;
+	}
+	if (source || scenes != liveScenes || !liveSource) {
+		obs_source_t *newSource = source ? obs_source_get_ref(source) : BuildSetSource(scenes);
+		obs_source_release(liveSource);
+		liveSource = newSource;
+		liveScenes = scenes;
+	}
+	lastLiveScenes = liveScenes;
+	apply_source(liveSource, useTransition);
+	UpdateTally();
+}
 
-	apply_selected_source();
+void DownstreamKeyer::ScenesChecked()
+{
+	const auto checked = CheckedScenes();
+	if (checked == checkedCache)
+		return;
+	checkedCache = checked;
+	// a running preview follows the checked scenes
+	if (IsPreviewing()) {
+		if (checked.isEmpty()) {
+			ClearPreview();
+		} else {
+			previewScenes = checked;
+			obs_source_release(previewSource);
+			previewSource = BuildSetSource(checked);
+			AttachPreview();
+		}
+	}
+	UpdateTally();
 }
 
 void DownstreamKeyer::ChangeSceneIndex(bool relative, int offset, int invalidIdx)
@@ -401,6 +556,7 @@ void DownstreamKeyer::ChangeSceneIndex(bool relative, int offset, int invalidIdx
 	scenesList->setCurrentRow(idx + offset);
 	item->setSelected(true);
 	scenesList->blockSignals(false);
+	ScenesChecked();
 }
 
 void DownstreamKeyer::Save(obs_data_t *data)
@@ -412,7 +568,8 @@ void DownstreamKeyer::Save(obs_data_t *data)
 	obs_data_set_string(data, "hide_transition", hideTransition ? obs_source_get_name(hideTransition) : "");
 	obs_data_set_int(data, "hide_transition_duration", hideTransitionDuration);
 	obs_data_set_int(data, "hide_after", hideAfter);
-	obs_data_set_bool(data, "tie", tie->isChecked());
+	obs_data_set_bool(data, "tie", sceneChangeMode == sceneChangeOn);
+	obs_data_set_int(data, "scene_change_mode", sceneChangeMode);
 	obs_data_array_t *sceneArray = obs_data_array_create();
 	for (int i = 0; i < scenesList->count(); i++) {
 		auto item = scenesList->item(i);
@@ -420,16 +577,33 @@ void DownstreamKeyer::Save(obs_data_t *data)
 			continue;
 		auto sceneData = obs_data_create();
 		obs_data_set_string(sceneData, "name", QT_TO_UTF8(item->text()));
+		obs_data_set_bool(sceneData, "checked", item->checkState() == Qt::Checked);
 		obs_data_array_push_back(sceneArray, sceneData);
 		obs_data_release(sceneData);
 	}
 	obs_data_set_array(data, "scenes", sceneArray);
-	obs_data_set_string(data, "scene", scenesList->currentItem() ? QT_TO_UTF8(scenesList->currentItem()->text()) : "");
 	obs_data_array_release(sceneArray);
+	// "scene" is kept for older versions and websocket clients: the first live scene
+	obs_data_set_string(data, "scene", liveScenes.isEmpty() ? "" : QT_TO_UTF8(liveScenes.first()));
+	auto live = obs_data_array_create();
+	for (const auto &s : liveScenes) {
+		auto obj = obs_data_create();
+		obs_data_set_string(obj, "name", QT_TO_UTF8(s));
+		obs_data_array_push_back(live, obj);
+		obs_data_release(obj);
+	}
+	obs_data_set_array(data, "live_scenes", live);
+	obs_data_array_release(live);
 
 	obs_data_array_t *nh = obs_hotkey_save(null_hotkey_id);
 	obs_data_set_array(data, "null_hotkey", nh);
 	obs_data_array_release(nh);
+	obs_data_array_t *glh = obs_hotkey_save(go_live_hotkey_id);
+	obs_data_set_array(data, "go_live_hotkey", glh);
+	obs_data_array_release(glh);
+	obs_data_array_t *ph = obs_hotkey_save(preview_hotkey_id);
+	obs_data_set_array(data, "preview_hotkey", ph);
+	obs_data_array_release(ph);
 	obs_data_array_t *eth = nullptr;
 	obs_data_array_t *dth = nullptr;
 	obs_hotkey_pair_save(tie_hotkey_id, &eth, &dth);
@@ -513,36 +687,10 @@ void DownstreamKeyer::SetTransition(const char *transition_name, enum transition
 		if (newTransition) {
 			//swap transition
 			obs_transition_swap_begin(newTransition, oldTransition);
-			if (view) {
-				obs_view_set_source(view, outputChannel, newTransition);
-			} else if (canvas) {
-				obs_canvas_set_channel(canvas, outputChannel, newTransition);
-			} else {
-				obs_set_output_source(outputChannel, newTransition);
-			}
+			set_output(newTransition);
 			obs_transition_swap_end(newTransition, oldTransition);
 		} else {
-			auto item = scenesList->currentItem();
-			if (item) {
-				auto scene = canvas ? obs_canvas_get_source_by_name(canvas, QT_TO_UTF8(item->text()))
-						    : obs_get_source_by_name(QT_TO_UTF8(item->text()));
-				if (view) {
-					obs_view_set_source(view, outputChannel, scene);
-				} else if (canvas) {
-					obs_canvas_set_channel(canvas, outputChannel, scene);
-				} else {
-					obs_set_output_source(outputChannel, scene);
-				}
-				obs_source_release(scene);
-			} else {
-				if (view) {
-					obs_view_set_source(view, outputChannel, nullptr);
-				} else if (canvas) {
-					obs_canvas_set_channel(canvas, outputChannel, nullptr);
-				} else {
-					obs_set_output_source(outputChannel, nullptr);
-				}
-			}
+			set_output(liveSource);
 		}
 	}
 	obs_source_release(prevSource);
@@ -587,62 +735,54 @@ int DownstreamKeyer::GetHideAfter()
 	return hideAfter;
 }
 
+// Exclude Scene, or Load On Scene with a scene that is not listed
+bool DownstreamKeyer::IsHiddenOn(const std::string &scene)
+{
+	if (exclude_scenes.find(scene) != exclude_scenes.end())
+		return true;
+	return !load_scenes.empty() && load_scenes.find(scene) == load_scenes.end();
+}
+
 void DownstreamKeyer::SceneChanged(std::string scene)
 {
-	auto found = false;
-	for (const auto &e : exclude_scenes) {
-		if (scene == e)
-			found = true;
-	}
+	const bool previewTake = IsPreviewTakeTo(scene);
 
-	// With Load On Scene set, any program scene not in that list is treated like an excluded scene.
-	// The selected keyer scene is kept, so it comes back on the next listed scene.
-	if (!load_scenes.empty() && load_scenes.find(scene) == load_scenes.end())
-		found = true;
-
-	if (found) {
+	if (IsHiddenOn(scene)) {
+		// the live scenes are kept, they come back on the next scene the keyer is shown on
+		if (previewTake)
+			ClearPreview();
 		apply_source(nullptr);
 		return;
 	}
 
-	// A listed program scene went live: if the keyer has nothing selected (it was cleared, or Hide After ran),
-	// load its last used keyer scene, or the first one in its list.
-	if (!load_scenes.empty() && scenesList->selectedItems().isEmpty() && scenesList->count() > 0) {
-		QListWidgetItem *item = nullptr;
-		if (!lastSelectedScene.isEmpty()) {
-			const auto matches = scenesList->findItems(lastSelectedScene, Qt::MatchFixedString);
-			if (!matches.isEmpty())
-				item = matches.first();
-		}
-		if (!item)
-			item = scenesList->item(0);
-		// apply below, the same way for tie and non-tie keyers
-		const QSignalBlocker blocker(scenesList);
-		scenesList->setCurrentItem(item);
-		item->setSelected(true);
-		lastSelectedScene = item->text();
-	}
-
-	{
-		obs_source_t *prevSource = view     ? obs_view_get_source(view, outputChannel)
-					   : canvas ? obs_canvas_get_channel(canvas, outputChannel)
-						    : obs_get_output_source(outputChannel);
-		if (prevSource && obs_source_get_type(prevSource) == OBS_SOURCE_TYPE_TRANSITION) {
-			obs_source_t *prevTransition = prevSource;
-			prevSource = obs_transition_get_active_source(prevTransition);
-			obs_source_release(prevTransition);
-		}
-		if (prevSource == nullptr) {
-			apply_selected_source();
-			return;
-		}
-		obs_source_release(prevSource);
-	}
-
-	if (!tie->isChecked())
+	// the previewed scenes go on program inside the scene, and on the keyer output when the transition ends
+	if (previewTake)
 		return;
 
-	apply_selected_source();
+	if (sceneChangeMode == sceneChangeOff) {
+		KeyerOff();
+		return;
+	}
+
+	// A listed program scene went live and nothing is live (it was turned off, or Hide After ran):
+	// load the last live scenes, or the first scene in the list.
+	if (!load_scenes.empty() && liveScenes.isEmpty() && scenesList->count() > 0) {
+		auto scenes = InListOrder(lastLiveScenes);
+		if (scenes.isEmpty())
+			scenes.append(scenesList->item(0)->text());
+		SetLiveScenes(scenes);
+	}
+
+	if (sceneChangeMode == sceneChangeOn) {
+		const auto checked = CheckedScenes();
+		if (!checked.isEmpty() && checked != liveScenes) {
+			SetLiveScenes(checked);
+			return;
+		}
+	}
+
+	// puts the live scenes back after an excluded scene, nothing changes if they are already on
+	apply_live_source();
 }
 
 void DownstreamKeyer::Load(obs_data_t *data)
@@ -654,32 +794,46 @@ void DownstreamKeyer::Load(obs_data_t *data)
 	SetTransition(obs_data_get_string(data, "hide_transition"), transitionType::hide);
 	hideTransitionDuration = obs_data_get_int(data, "hide_transition_duration");
 	hideAfter = obs_data_get_int(data, "hide_after");
-	tie->setChecked(obs_data_get_bool(data, "tie"));
+	if (obs_data_has_user_value(data, "scene_change_mode"))
+		sceneChangeMode = (int)obs_data_get_int(data, "scene_change_mode");
+	else
+		sceneChangeMode = obs_data_get_bool(data, "tie") ? sceneChangeOn : sceneChangeNone;
+
+	// live scenes: this version saves a list, earlier versions the one scene that was on the output
+	QStringList live;
+	obs_data_array_t *liveArray = obs_data_get_array(data, "live_scenes");
+	if (liveArray) {
+		const auto count = obs_data_array_count(liveArray);
+		for (size_t i = 0; i < count; i++) {
+			auto obj = obs_data_array_item(liveArray, i);
+			live.append(QT_UTF8(obs_data_get_string(obj, "name")));
+			obs_data_release(obj);
+		}
+		obs_data_array_release(liveArray);
+	} else if (obs_data_has_user_value(data, "live_scene")) {
+		const auto s = QT_UTF8(obs_data_get_string(data, "live_scene"));
+		if (!s.isEmpty())
+			live.append(s);
+	} else {
+		const auto s = QT_UTF8(obs_data_get_string(data, "scene"));
+		if (!s.isEmpty())
+			live.append(s);
+	}
+
+	scenesList->blockSignals(true);
 	scenesList->clear();
 	obs_data_array_t *sceneArray = obs_data_get_array(data, "scenes");
-	const auto sceneName = QT_UTF8(obs_data_get_string(data, "scene"));
 	if (sceneArray) {
 		auto count = obs_data_array_count(sceneArray);
 		for (size_t i = 0; i < count; i++) {
 			const auto sceneData = obs_data_array_item(sceneArray, i);
 			const auto source_name = obs_data_get_string(sceneData, "name");
 			const auto item = new QListWidgetItem(QT_UTF8(source_name));
+			item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+			item->setCheckState(obs_data_get_bool(sceneData, "checked") ? Qt::Checked : Qt::Unchecked);
 			scenesList->addItem(item);
 			obs_source_t *source = canvas ? obs_canvas_get_source_by_name(canvas, source_name)
 						      : obs_get_source_by_name(source_name);
-			if (item->text() == sceneName) {
-				if (source) {
-					if (view) {
-						obs_view_set_source(view, outputChannel, source);
-					} else if (canvas) {
-						obs_canvas_set_channel(canvas, outputChannel, source);
-					} else {
-						obs_set_output_source(outputChannel, source);
-					}
-				}
-				scenesList->setCurrentItem(item);
-				item->setSelected(true);
-			}
 			obs_data_release(sceneData);
 
 			if (source) {
@@ -701,17 +855,26 @@ void DownstreamKeyer::Load(obs_data_t *data)
 		}
 		obs_data_array_release(sceneArray);
 	}
-	if (sceneName.isEmpty()) {
-		for (int i = 0; i < scenesList->count(); i++) {
-			scenesList->item(i)->setSelected(false);
-		}
-		const auto row = scenesList->currentRow();
-		if (row != -1)
-			scenesList->setCurrentRow(-1);
-	}
+	scenesList->setCurrentRow(-1);
+	scenesList->blockSignals(false);
+	checkedCache = CheckedScenes();
+
+	liveScenes = InListOrder(live);
+	lastLiveScenes = liveScenes;
+	obs_source_release(liveSource);
+	liveSource = BuildSetSource(liveScenes);
+	if (liveSource)
+		set_output(liveSource);
+
 	obs_data_array_t *nh = obs_data_get_array(data, "null_hotkey");
 	obs_hotkey_load(null_hotkey_id, nh);
 	obs_data_array_release(nh);
+	obs_data_array_t *glh = obs_data_get_array(data, "go_live_hotkey");
+	obs_hotkey_load(go_live_hotkey_id, glh);
+	obs_data_array_release(glh);
+	obs_data_array_t *ph = obs_data_get_array(data, "preview_hotkey");
+	obs_hotkey_load(preview_hotkey_id, ph);
+	obs_data_array_release(ph);
 	obs_data_array_t *eth = obs_data_get_array(data, "enable_tie_hotkey");
 	obs_data_array_t *dth = obs_data_get_array(data, "disable_tie_hotkey");
 	obs_hotkey_pair_load(tie_hotkey_id, eth, dth);
@@ -745,6 +908,7 @@ void DownstreamKeyer::Load(obs_data_t *data)
 		}
 		obs_data_array_release(loads);
 	}
+	UpdateTally();
 }
 
 void DownstreamKeyer::source_rename(void *data, calldata_t *calldata)
@@ -758,6 +922,13 @@ void DownstreamKeyer::source_rename(void *data, calldata_t *calldata)
 		if (item->text() == prevName)
 			item->setText(newName);
 	}
+	downstreamKeyer->liveScenes.replaceInStrings(QRegularExpression("^" + QRegularExpression::escape(prevName) + "$"),
+						     newName);
+	downstreamKeyer->lastLiveScenes.replaceInStrings(
+		QRegularExpression("^" + QRegularExpression::escape(prevName) + "$"), newName);
+	downstreamKeyer->previewScenes.replaceInStrings(QRegularExpression("^" + QRegularExpression::escape(prevName) + "$"),
+							newName);
+	downstreamKeyer->checkedCache = downstreamKeyer->CheckedScenes();
 }
 
 void DownstreamKeyer::source_remove(void *data, calldata_t *calldata)
@@ -766,13 +937,42 @@ void DownstreamKeyer::source_remove(void *data, calldata_t *calldata)
 	const auto name = QT_UTF8(obs_source_get_name(static_cast<obs_source_t *>(calldata_ptr(calldata, "source"))));
 
 	const auto count = downstreamKeyer->scenesList->count();
+	bool found = false;
 	for (int i = count - 1; i >= 0; i--) {
 		const auto item = downstreamKeyer->scenesList->item(i);
 		if (item->text() == name) {
 			downstreamKeyer->scenesList->removeItemWidget(item);
 			obs_hotkey_pair_unregister(item->data(Qt::UserRole).toUInt());
 			delete item;
+			found = true;
 		}
+	}
+	if (!found)
+		return;
+	// layered live scenes drop the removed scene by themselves, a single live scene goes off
+	downstreamKeyer->lastLiveScenes.removeAll(name);
+	if (downstreamKeyer->liveScenes.removeAll(name) && downstreamKeyer->liveScenes.isEmpty())
+		QMetaObject::invokeMethod(downstreamKeyer, "KeyerOff", Qt::QueuedConnection);
+	QMetaObject::invokeMethod(downstreamKeyer, [downstreamKeyer]() { downstreamKeyer->ScenesChecked(); },
+				  Qt::QueuedConnection);
+}
+
+// scene hotkeys put a scene on or off the output right away, next to the other live scenes
+void DownstreamKeyer::SetSceneHotkey(obs_hotkey_pair_id id, bool show)
+{
+	for (int i = 0; i < scenesList->count(); i++) {
+		auto item = scenesList->item(i);
+		if (!item || item->data(Qt::UserRole).toUInt() != id)
+			continue;
+		const auto name = item->text();
+		item->setCheckState(show ? Qt::Checked : Qt::Unchecked);
+		QStringList scenes = liveScenes;
+		if (show && !scenes.contains(name))
+			scenes.append(name);
+		else if (!show)
+			scenes.removeAll(name);
+		SetLiveScenes(InListOrder(scenes));
+		return;
 	}
 }
 
@@ -782,19 +982,9 @@ bool DownstreamKeyer::enable_DSK_hotkey(void *data, obs_hotkey_pair_id id, obs_h
 	if (!pressed)
 		return false;
 	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
-	bool changed = false;
-	for (int i = 0; i < downstreamKeyer->scenesList->count(); i++) {
-		auto item = downstreamKeyer->scenesList->item(i);
-		if (!item)
-			continue;
-		if (item->data(Qt::UserRole).toUInt() == id) {
-			if (!item->isSelected()) {
-				item->setSelected(true);
-				changed = true;
-			}
-		}
-	}
-	return changed;
+	QMetaObject::invokeMethod(downstreamKeyer, [downstreamKeyer, id]() { downstreamKeyer->SetSceneHotkey(id, true); },
+				  Qt::QueuedConnection);
+	return true;
 }
 
 bool DownstreamKeyer::disable_DSK_hotkey(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed)
@@ -803,19 +993,9 @@ bool DownstreamKeyer::disable_DSK_hotkey(void *data, obs_hotkey_pair_id id, obs_
 	if (!pressed)
 		return false;
 	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
-	bool changed = false;
-	for (int i = 0; i < downstreamKeyer->scenesList->count(); i++) {
-		auto item = downstreamKeyer->scenesList->item(i);
-		if (!item)
-			continue;
-		if (item->data(Qt::UserRole).toUInt() == id) {
-			if (item->isSelected()) {
-				item->setSelected(false);
-				changed = true;
-			}
-		}
-	}
-	return changed;
+	QMetaObject::invokeMethod(downstreamKeyer, [downstreamKeyer, id]() { downstreamKeyer->SetSceneHotkey(id, false); },
+				  Qt::QueuedConnection);
+	return true;
 }
 
 void DownstreamKeyer::null_hotkey(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed)
@@ -825,9 +1005,10 @@ void DownstreamKeyer::null_hotkey(void *data, obs_hotkey_id id, obs_hotkey_t *ho
 	if (!pressed)
 		return;
 	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
-	QMetaObject::invokeMethod(downstreamKeyer, "on_actionSceneNull_triggered", Qt::QueuedConnection);
+	QMetaObject::invokeMethod(downstreamKeyer, "KeyerOff", Qt::QueuedConnection);
 }
 
+// the tie hotkeys switch Transition On with Scene Change on and off
 bool DownstreamKeyer::enable_tie_hotkey(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed)
 {
 	UNUSED_PARAMETER(id);
@@ -835,9 +1016,10 @@ bool DownstreamKeyer::enable_tie_hotkey(void *data, obs_hotkey_pair_id id, obs_h
 	if (!pressed)
 		return false;
 	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
-	if (downstreamKeyer->tie->isChecked())
+	if (downstreamKeyer->sceneChangeMode == sceneChangeOn)
 		return false;
-	downstreamKeyer->tie->setChecked(true);
+	QMetaObject::invokeMethod(downstreamKeyer, [downstreamKeyer]() { downstreamKeyer->SetTie(true); },
+				  Qt::QueuedConnection);
 	return true;
 }
 bool DownstreamKeyer::disable_tie_hotkey(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed)
@@ -847,106 +1029,29 @@ bool DownstreamKeyer::disable_tie_hotkey(void *data, obs_hotkey_pair_id id, obs_
 	if (!pressed)
 		return false;
 	const auto downstreamKeyer = static_cast<DownstreamKeyer *>(data);
-	if (!downstreamKeyer->tie->isChecked())
+	if (downstreamKeyer->sceneChangeMode != sceneChangeOn)
 		return false;
-	downstreamKeyer->tie->setChecked(false);
+	QMetaObject::invokeMethod(downstreamKeyer, [downstreamKeyer]() { downstreamKeyer->SetTie(false); },
+				  Qt::QueuedConnection);
 	return true;
 }
 
-void DownstreamKeyer::AddExcludeScene(const char *scene_name)
+void DownstreamKeyer::go_live_hotkey(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed)
 {
-	if (exclude_scenes.count(scene_name) > 0)
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
+	if (!pressed)
 		return;
-	exclude_scenes.emplace(scene_name);
-	obs_source_t *scene = nullptr;
-	if (view) {
-		obs_source_t *source = obs_view_get_source(view, 0);
-		while (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
-			obs_source_t *ts = obs_transition_get_active_source(source);
-			if (ts) {
-				obs_source_release(source);
-				source = ts;
-			} else {
-				break;
-			}
-		}
-		if (source && obs_source_is_scene(source)) {
-			scene = source;
-		} else {
-			obs_source_release(source);
-		}
-	} else if (canvas) {
-		obs_source_t *source = obs_canvas_get_channel(canvas, 0);
-		while (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
-			obs_source_t *ts = obs_transition_get_active_source(source);
-			if (ts) {
-				obs_source_release(source);
-				source = ts;
-			} else {
-				break;
-			}
-		}
-		if (source && obs_source_is_scene(source)) {
-			scene = source;
-		} else {
-			obs_source_release(source);
-		}
-	} else {
-		scene = obs_frontend_get_current_scene();
-	}
-	const auto sn = obs_source_get_name(scene);
-	if (strcmp(sn, scene_name) == 0)
-		SceneChanged(sn);
-	obs_source_release(scene);
+	QMetaObject::invokeMethod(static_cast<DownstreamKeyer *>(data), "GoLive", Qt::QueuedConnection);
 }
 
-void DownstreamKeyer::RemoveExcludeScene(const char *scene_name)
+void DownstreamKeyer::preview_hotkey(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed)
 {
-	exclude_scenes.erase(scene_name);
-	obs_source_t *scene = nullptr;
-	if (view) {
-		obs_source_t *source = obs_view_get_source(view, 0);
-		while (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
-			obs_source_t *ts = obs_transition_get_active_source(source);
-			if (ts) {
-				obs_source_release(source);
-				source = ts;
-			} else {
-				break;
-			}
-		}
-		if (source && obs_source_is_scene(source)) {
-			scene = source;
-		} else {
-			obs_source_release(source);
-		}
-	} else if (canvas) {
-		obs_source_t *source = obs_canvas_get_channel(canvas, 0);
-		while (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
-			obs_source_t *ts = obs_transition_get_active_source(source);
-			if (ts) {
-				obs_source_release(source);
-				source = ts;
-			} else {
-				break;
-			}
-		}
-		if (source && obs_source_is_scene(source)) {
-			scene = source;
-		} else {
-			obs_source_release(source);
-		}
-	} else {
-		scene = obs_frontend_get_current_scene();
-	}
-	const auto sn = obs_source_get_name(scene);
-	if (strcmp(sn, scene_name) == 0)
-		SceneChanged(sn);
-	obs_source_release(scene);
-}
-bool DownstreamKeyer::IsSceneExcluded(const char *scene_name)
-{
-	return exclude_scenes.find(scene_name) != exclude_scenes.end();
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
+	if (!pressed)
+		return;
+	QMetaObject::invokeMethod(static_cast<DownstreamKeyer *>(data), "TogglePreview", Qt::QueuedConnection);
 }
 
 std::string DownstreamKeyer::GetProgramSceneName()
@@ -973,6 +1078,27 @@ std::string DownstreamKeyer::GetProgramSceneName()
 	return name;
 }
 
+void DownstreamKeyer::AddExcludeScene(const char *scene_name)
+{
+	if (exclude_scenes.count(scene_name) > 0)
+		return;
+	exclude_scenes.emplace(scene_name);
+	if (GetProgramSceneName() == scene_name)
+		SceneChanged(scene_name);
+}
+
+void DownstreamKeyer::RemoveExcludeScene(const char *scene_name)
+{
+	exclude_scenes.erase(scene_name);
+	if (GetProgramSceneName() == scene_name)
+		SceneChanged(scene_name);
+}
+
+bool DownstreamKeyer::IsSceneExcluded(const char *scene_name)
+{
+	return exclude_scenes.find(scene_name) != exclude_scenes.end();
+}
+
 void DownstreamKeyer::AddLoadScene(const char *scene_name)
 {
 	if (!scene_name || !*scene_name || !load_scenes.emplace(scene_name).second)
@@ -995,40 +1121,45 @@ bool DownstreamKeyer::IsLoadScene(const char *scene_name)
 
 QString DownstreamKeyer::GetScene()
 {
-	for (int i = 0; i < scenesList->count(); i++) {
-		const auto item = scenesList->item(i);
-		if (!item)
-			continue;
-		if (!item->isSelected())
-			continue;
-		return item->text();
-	}
-	return "";
+	return liveScenes.isEmpty() ? QString() : liveScenes.first();
 }
 
+// check only this scene
+bool DownstreamKeyer::ArmScene(const QString &scene_name)
+{
+	if (scene_name.isEmpty())
+		return true;
+	if (scenesList->findItems(scene_name, Qt::MatchFixedString).isEmpty())
+		return false;
+	{
+		const QSignalBlocker blocker(scenesList);
+		for (int i = 0; i < scenesList->count(); i++) {
+			auto item = scenesList->item(i);
+			item->setCheckState(item->text() == scene_name ? Qt::Checked : Qt::Unchecked);
+		}
+	}
+	ScenesChecked();
+	return true;
+}
+
+// websocket dsk_select_scene: this scene only goes live right away
 bool DownstreamKeyer::SwitchToScene(QString scene_name)
 {
 	if (scene_name.isEmpty()) {
-		on_actionSceneNull_triggered();
+		KeyerOff();
 		return true;
 	}
-	for (int i = 0; i < scenesList->count(); i++) {
-		const auto item = scenesList->item(i);
-		if (!item)
-			continue;
-		if (item->text() == scene_name) {
-			if (!item->isSelected()) {
-				item->setSelected(true);
-			}
-			return true;
-		}
-	}
-	return false;
+	if (!ArmScene(scene_name))
+		return false;
+	SetLiveScenes({scene_name});
+	return true;
 }
 
 void DownstreamKeyer::add_scene(QString scene_name, obs_source_t *s, int insertBeforeRow)
 {
 	const auto item = new QListWidgetItem(scene_name);
+	item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+	item->setCheckState(Qt::Unchecked);
 	int scenesListCount = scenesList->count();
 	if ((insertBeforeRow > scenesListCount) || (insertBeforeRow < 0)) {
 		insertBeforeRow = scenesListCount;
@@ -1083,6 +1214,7 @@ bool DownstreamKeyer::RemoveScene(QString scene_name)
 			scenesList->removeItemWidget(item);
 			obs_hotkey_pair_unregister(item->data(Qt::UserRole).toUInt());
 			delete item;
+			ScenesChecked();
 			return true;
 		}
 	}
@@ -1091,7 +1223,15 @@ bool DownstreamKeyer::RemoveScene(QString scene_name)
 
 void DownstreamKeyer::SetTie(bool tie)
 {
-	this->tie->setChecked(tie);
+	SetSceneChangeMode(tie ? sceneChangeOn : sceneChangeNone);
+}
+
+void DownstreamKeyer::SetSceneChangeMode(int mode)
+{
+	if (mode < sceneChangeNone || mode > sceneChangeOff)
+		mode = sceneChangeNone;
+	sceneChangeMode = mode;
+	UpdateButtons();
 }
 
 void DownstreamKeyer::SetOutputChannel(int oc)
@@ -1109,30 +1249,15 @@ void DownstreamKeyer::SetOutputChannel(int oc)
 	if (prevTransition) {
 		if (prevTransition == transition || prevTransition == showTransition || prevTransition == hideTransition ||
 		    prevTransition == overrideTransition) {
-			if (view) {
-				obs_view_set_source(view, outputChannel, nullptr);
-			} else if (canvas) {
-				obs_canvas_set_channel(canvas, outputChannel, nullptr);
-			} else {
-				obs_set_output_source(outputChannel, nullptr);
-			}
+			set_output(nullptr);
 		} else {
 			obs_source_release(prevTransition);
 			prevTransition = nullptr;
 		}
 	} else if (prevSource) {
-		const auto l = scenesList->selectedItems();
-		const auto newSource = l.count() ? (canvas ? obs_canvas_get_source_by_name(canvas, QT_TO_UTF8(l.value(0)->text()))
-							   : obs_get_source_by_name(QT_TO_UTF8(l.value(0)->text())))
-						 : nullptr;
+		const auto newSource = liveSource ? obs_source_get_ref(liveSource) : nullptr;
 		if (prevSource == newSource) {
-			if (view) {
-				obs_view_set_source(view, outputChannel, nullptr);
-			} else if (canvas) {
-				obs_canvas_set_channel(canvas, outputChannel, nullptr);
-			} else {
-				obs_set_output_source(outputChannel, nullptr);
-			}
+			set_output(nullptr);
 			obs_source_release(newSource);
 		} else {
 			obs_source_release(prevSource);
@@ -1141,18 +1266,286 @@ void DownstreamKeyer::SetOutputChannel(int oc)
 	}
 	outputChannel = oc;
 	if (prevTransition) {
-		if (view) {
-			obs_view_set_source(view, outputChannel, prevTransition);
-		} else if (canvas) {
-			obs_canvas_set_channel(canvas, outputChannel, prevTransition);
-		} else {
-			obs_set_output_source(outputChannel, prevTransition);
-		}
+		set_output(prevTransition);
 	} else {
-		apply_selected_source();
+		apply_live_source();
 	}
 	obs_source_release(prevSource);
 	obs_source_release(prevTransition);
+}
+
+// ---- Go Live and Go to Preview ----
+
+static obs_source_t *get_main_program_scene()
+{
+	obs_source_t *source = obs_get_output_source(0);
+	while (source && obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+		obs_source_t *active = obs_transition_get_active_source(source);
+		obs_source_release(source);
+		source = active;
+	}
+	return source;
+}
+
+static bool main_transition_running()
+{
+	obs_source_t *transition = obs_get_output_source(0);
+	bool running = false;
+	if (transition && obs_source_get_type(transition) == OBS_SOURCE_TYPE_TRANSITION) {
+		const float t = obs_transition_get_time(transition);
+		running = t > 0.0f && t < 1.0f;
+	}
+	obs_source_release(transition);
+	return running;
+}
+
+struct preview_items_ctx {
+	const char *owner;
+	std::vector<obs_sceneitem_t *> items;
+};
+
+void dsk_remove_preview_items(obs_source_t *scene_source, const char *owner)
+{
+	obs_scene_t *scene = obs_scene_from_source(scene_source);
+	if (!scene)
+		return;
+	preview_items_ctx ctx{owner, {}};
+	obs_scene_enum_items(
+		scene,
+		[](obs_scene_t *, obs_sceneitem_t *item, void *param) {
+			auto c = static_cast<preview_items_ctx *>(param);
+			obs_data_t *priv = obs_sceneitem_get_private_settings(item);
+			if (obs_data_get_bool(priv, "dsk_preview") &&
+			    (!c->owner || strcmp(obs_data_get_string(priv, "dsk_preview_owner"), c->owner) == 0)) {
+				obs_sceneitem_addref(item);
+				c->items.push_back(item);
+			}
+			obs_data_release(priv);
+			return true;
+		},
+		&ctx);
+	for (auto item : ctx.items) {
+		obs_sceneitem_remove(item);
+		obs_sceneitem_release(item);
+	}
+}
+
+void dsk_purge_preview_items()
+{
+	struct obs_frontend_source_list scenes = {};
+	obs_frontend_get_scenes(&scenes);
+	for (size_t i = 0; i < scenes.sources.num; i++)
+		dsk_remove_preview_items(scenes.sources.array[i], nullptr);
+	obs_frontend_source_list_free(&scenes);
+}
+
+bool DownstreamKeyer::PreviewSupported()
+{
+	// studio mode only exists for the main OBS output
+	return !view && !canvas;
+}
+
+void DownstreamKeyer::GoLive()
+{
+	// a running preview is what goes live, otherwise the checked scenes
+	if (IsPreviewing()) {
+		const auto scenes = previewScenes;
+		obs_source_t *source = obs_source_get_ref(previewSource);
+		ClearPreview();
+		SetLiveScenes(scenes, source);
+		obs_source_release(source);
+		return;
+	}
+	SetLiveScenes(CheckedScenes());
+}
+
+void DownstreamKeyer::TogglePreview()
+{
+	if (IsPreviewing()) {
+		ClearPreview();
+		return;
+	}
+	const auto checked = CheckedScenes();
+	if (!PreviewSupported() || !obs_frontend_preview_program_mode_active() || checked.isEmpty()) {
+		UpdateButtons();
+		return;
+	}
+	previewScenes = checked;
+	obs_source_release(previewSource);
+	previewSource = BuildSetSource(checked);
+	AttachPreview();
+	UpdateTally();
+}
+
+void DownstreamKeyer::AttachPreview()
+{
+	RemovePreviewItems(false);
+	obs_weak_source_release(previewTarget);
+	previewTarget = nullptr;
+	obs_weak_source_release(previewProgramAtAttach);
+	previewProgramAtAttach = nullptr;
+	if (!previewSource)
+		return;
+
+	obs_source_t *previewScene = obs_frontend_get_current_preview_scene();
+	obs_source_t *program = get_main_program_scene();
+	obs_scene_t *scene = obs_scene_from_source(previewScene);
+	// never add to the scene that is on program right now, that would put the keyer scenes on air
+	if (scene && previewScene != program && previewSource != previewScene) {
+		obs_sceneitem_t *item = obs_scene_add(scene, previewSource);
+		if (item) {
+			obs_data_t *priv = obs_sceneitem_get_private_settings(item);
+			obs_data_set_bool(priv, "dsk_preview", true);
+			obs_data_set_string(priv, "dsk_preview_owner", previewToken.c_str());
+			obs_data_release(priv);
+			obs_sceneitem_set_locked(item, true);
+			previewTarget = obs_source_get_weak_source(previewScene);
+		}
+	}
+	if (program)
+		previewProgramAtAttach = obs_source_get_weak_source(program);
+	obs_source_release(program);
+	obs_source_release(previewScene);
+}
+
+void DownstreamKeyer::RemovePreviewItems(bool everywhere)
+{
+	obs_source_t *target = obs_weak_source_get_source(previewTarget);
+	if (target)
+		dsk_remove_preview_items(target, previewToken.c_str());
+	obs_source_release(target);
+	if (!everywhere)
+		return;
+	// with scene duplication the program scene is a copy that carries the item as well
+	obs_source_t *program = get_main_program_scene();
+	if (program)
+		dsk_remove_preview_items(program, previewToken.c_str());
+	obs_source_release(program);
+	struct obs_frontend_source_list scenes = {};
+	obs_frontend_get_scenes(&scenes);
+	for (size_t i = 0; i < scenes.sources.num; i++)
+		dsk_remove_preview_items(scenes.sources.array[i], previewToken.c_str());
+	obs_frontend_source_list_free(&scenes);
+}
+
+void DownstreamKeyer::ClearPreview()
+{
+	if (!IsPreviewing() && !previewTarget && !previewSource) {
+		UpdateButtons();
+		return;
+	}
+	RemovePreviewItems(false);
+	obs_weak_source_release(previewTarget);
+	previewTarget = nullptr;
+	obs_weak_source_release(previewProgramAtAttach);
+	previewProgramAtAttach = nullptr;
+	obs_source_release(previewSource);
+	previewSource = nullptr;
+	previewScenes.clear();
+	UpdateTally();
+}
+
+void DownstreamKeyer::StudioModeChanged()
+{
+	if (!obs_frontend_preview_program_mode_active())
+		ClearPreview();
+	UpdateButtons();
+}
+
+void DownstreamKeyer::PreviewSceneChanged()
+{
+	if (!IsPreviewing())
+		return;
+	// with "swap scenes" the preview changes at the end of the transition that took the preview scene live
+	CheckPreviewTake();
+	if (!IsPreviewing())
+		return;
+	AttachPreview();
+	UpdateTally();
+}
+
+// is the program transition to scene taking the previewed keyer scenes live
+bool DownstreamKeyer::IsPreviewTakeTo(const std::string &scene)
+{
+	if (!IsPreviewing() || !previewTarget)
+		return false;
+	obs_source_t *target = obs_weak_source_get_source(previewTarget);
+	const bool take = target && scene == obs_source_get_name(target);
+	obs_source_release(target);
+	return take;
+}
+
+void DownstreamKeyer::CheckPreviewTake()
+{
+	if (!IsPreviewing() || !previewTarget || main_transition_running())
+		return;
+	obs_source_t *program = get_main_program_scene();
+	obs_source_t *target = obs_weak_source_get_source(previewTarget);
+	obs_source_t *programAtAttach = obs_weak_source_get_source(previewProgramAtAttach);
+	// a new program scene (a copy of it with scene duplication) with the name of the previewed scene
+	const bool taken = program && target && program != programAtAttach &&
+			   strcmp(obs_source_get_name(program), obs_source_get_name(target)) == 0;
+	const std::string programName = program ? obs_source_get_name(program) : "";
+	obs_source_release(programAtAttach);
+	obs_source_release(target);
+	obs_source_release(program);
+	if (!taken)
+		return;
+
+	if (IsHiddenOn(programName)) {
+		RemovePreviewItems(true);
+		ClearPreview();
+		return;
+	}
+
+	// The keyer scenes went on program inside the scene. Put the same source on the keyer output without a
+	// transition, so it looks the same, then take the scene item out. Hide After starts now.
+	const auto scenes = previewScenes;
+	obs_source_t *source = obs_source_get_ref(previewSource);
+	SetLiveScenes(scenes, source, false);
+	obs_source_release(source);
+	RemovePreviewItems(true);
+	ClearPreview();
+}
+
+void DownstreamKeyer::UpdateTally()
+{
+	const QBrush liveBrush(QColor(230, 60, 60));
+	const QBrush previewBrush(QColor(70, 190, 100));
+	const QSignalBlocker blocker(scenesList);
+	for (int i = 0; i < scenesList->count(); i++) {
+		auto item = scenesList->item(i);
+		const bool live = liveScenes.contains(item->text());
+		const bool preview = previewScenes.contains(item->text());
+		QFont font = item->font();
+		font.setBold(live || preview);
+		item->setFont(font);
+		if (live)
+			item->setForeground(liveBrush);
+		else if (preview)
+			item->setForeground(previewBrush);
+		else
+			item->setData(Qt::ForegroundRole, QVariant());
+	}
+	scenesList->viewport()->update();
+	UpdateButtons();
+}
+
+void DownstreamKeyer::UpdateButtons()
+{
+	previewButton->setVisible(PreviewSupported() && obs_frontend_preview_program_mode_active());
+
+	const bool previewing = IsPreviewing();
+	const auto armed = previewing ? previewScenes : CheckedScenes();
+	// Go Live lights up when it has something new to take live
+	const bool goLiveArmed = !armed.isEmpty() && armed != liveScenes;
+	goLiveButton->setStyleSheet(goLiveArmed ? "background-color: #b71c1c; color: white; font-weight: bold;" : "");
+	previewButton->setChecked(previewing);
+	previewButton->setStyleSheet(previewing ? "background-color: #1b5e20; color: white; font-weight: bold;" : "");
+
+	changeOnButton->setChecked(sceneChangeMode == sceneChangeOn);
+	changeOffButton->setChecked(sceneChangeMode == sceneChangeOff);
+	changeNoneButton->setChecked(sceneChangeMode == sceneChangeNone);
 }
 
 LockedCheckBox::LockedCheckBox()

@@ -34,6 +34,22 @@ private:
 	bool SetLoadScene(QString dskName, const char *sceneName, bool add);
 	static void load_scene_request(obs_data_t *request_data, obs_data_t *response_data, bool add);
 
+	template<typename F> void ForEachKeyer(F f)
+	{
+		if (closing)
+			return;
+		for (int i = 0; i < tabs->count(); i++) {
+			if (auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i)))
+				f(w);
+		}
+	}
+	// program scene whose transition start was already handled, so the end of it is skipped
+	std::string transitionStartedScene;
+	static void transition_start(void *data, calldata_t *cd);
+	void ProgramTransitionStarting(const std::string &scene);
+	bool KeyerAction(QString dskName, QString sceneName, bool preview);
+	static void keyer_action_request(obs_data_t *request_data, obs_data_t *response_data, bool preview);
+
 	void ClearKeyers();
 	void AddDefaultKeyer();
 	void ConfigClicked();
@@ -73,5 +89,7 @@ public:
 	static void remove_exclude_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void add_load_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void remove_load_scene(obs_data_t *request_data, obs_data_t *response_data, void *param);
+	static void go_live(obs_data_t *request_data, obs_data_t *response_data, void *param);
+	static void go_to_preview(obs_data_t *request_data, obs_data_t *response_data, void *param);
 	static void remove_canvas(void *data, calldata_t *cd);
 };
