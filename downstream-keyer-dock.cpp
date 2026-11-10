@@ -472,7 +472,7 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v,
 	};
 	connect(tabs, &QTabWidget::currentChanged, this, [this]() { UpdateTabTally(); });
 
-	// All Keyer Actions: buttons above the tabs that act on every keyer in this dock
+	// Global Keyer Actions: buttons above the tabs that act on every keyer in this dock
 	auto allKeyersTitle = new QLabel(QT_UTF8(obs_module_text("AllKeyersTitle")), this);
 	QFont titleFont = allKeyersTitle->font();
 	titleFont.setBold(true);
@@ -515,6 +515,13 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v,
 	titleRow->addWidget(allKeyersTitle);
 	l->addLayout(titleRow);
 	l->addLayout(allKeyersGrid);
+	// header for the keyer tabs, set apart from the global buttons above
+	auto keyersTitle = new QLabel(QT_UTF8(obs_module_text("KeyersTitle")), this);
+	keyersTitle->setFont(titleFont);
+	auto keyersTitleRow = new QHBoxLayout;
+	keyersTitleRow->setContentsMargins(4, 4, 4, 0);
+	keyersTitleRow->addWidget(keyersTitle);
+	l->addLayout(keyersTitleRow);
 	l->addLayout(tabGrid);
 	l->addWidget(tabs);
 	setLayout(l);
@@ -634,7 +641,19 @@ void DownstreamKeyerDock::SyncTabButtons()
 			b->deleteLater();
 		}
 		tabButtons.clear();
-		const int columns = std::max(1, std::min(count, 3));
+		for (auto b : tabBlanks) {
+			tabGrid->removeWidget(b);
+			b->deleteLater();
+		}
+		tabBlanks.clear();
+		const int columns = 3;
+		// with fewer than three keyers the row is filled with blank tabs, so a tab is always a third of the width
+		for (int i = count; i < columns; i++) {
+			auto b = new QPushButton(this);
+			b->setEnabled(false);
+			tabGrid->addWidget(b, 0, i);
+			tabBlanks.push_back(b);
+		}
 		for (int i = 0; i < count; i++) {
 			auto b = new QPushButton(this);
 			b->setCheckable(true);

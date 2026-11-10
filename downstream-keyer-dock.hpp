@@ -38,6 +38,7 @@ private:
 	// the keyer tabs as a grid of buttons, three to a row (the tab widget's own tab bar is hidden)
 	QGridLayout *tabGrid = nullptr;
 	std::vector<QPushButton *> tabButtons;
+	std::vector<QPushButton *> tabBlanks;
 	int dragFrom = -1;
 	QPoint dragStart;
 	void SyncTabButtons();
