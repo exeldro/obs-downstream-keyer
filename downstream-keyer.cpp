@@ -84,6 +84,8 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_c
 	row->addWidget(scenesList);
 
 	sideColumn = new QWidget(this);
+	// keep the buttons as narrow as their longest label: the scenes list takes any extra width
+	sideColumn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
 	auto column = new QVBoxLayout(sideColumn);
 	column->setContentsMargins(4, 4, 4, 4);
 	column->setSpacing(4);
@@ -91,6 +93,9 @@ DownstreamKeyer::DownstreamKeyer(int channel, QString name, obs_view_t *v, obs_c
 	auto addTitle = [&](const char *text) {
 		auto title = new QLabel(QT_UTF8(obs_module_text(text)), sideColumn);
 		title->setAlignment(Qt::AlignCenter);
+		// wraps to the width of the buttons instead of making the column wider
+		title->setWordWrap(true);
+		title->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 		QFont font = title->font();
 		font.setBold(true);
 		title->setFont(font);
@@ -692,6 +697,14 @@ void DownstreamKeyer::ChangeSceneIndex(bool relative, int offset, int invalidIdx
 	item->setSelected(true);
 	scenesList->blockSignals(false);
 	ScenesChecked();
+}
+
+void DownstreamKeyer::AddToolbarWidget(QWidget *widget)
+{
+	auto spacer = new QWidget(scenesToolbar);
+	spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+	scenesToolbar->addWidget(spacer);
+	scenesToolbar->addWidget(widget);
 }
 
 void DownstreamKeyer::Save(obs_data_t *data)

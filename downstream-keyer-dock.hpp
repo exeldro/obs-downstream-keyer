@@ -4,6 +4,7 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <QFrame>
+#include <QGridLayout>
 #include <vector>
 #include <QPushButton>
 #include <obs-frontend-api.h>
@@ -28,9 +29,18 @@ private:
 	bool offAtSceneChange = false;
 	// Keyer Off at Scene Change is one-shot: it was used by the program transition that is running
 	bool offAtSceneChangeUsed = false;
+	QPushButton *allKeyersOffButton = nullptr;
 	QPushButton *offAtSceneChangeButton = nullptr;
 	QPushButton *holdKeyersButton = nullptr;
 	QPushButton *transitionKeyersButton = nullptr;
+	QGridLayout *allKeyersGrid = nullptr;
+
+	// the keyer tabs as a grid of buttons, three to a row (the tab widget's own tab bar is hidden)
+	QGridLayout *tabGrid = nullptr;
+	std::vector<QPushButton *> tabButtons;
+	int dragFrom = -1;
+	QPoint dragStart;
+	void SyncTabButtons();
 
 	void Save(obs_data_t *data);
 	void Load(obs_data_t *data);
@@ -80,6 +90,9 @@ private:
 	void AddTransitionMenu(QMenu *tm, enum transitionType transition_type);
 	void AddExcludeSceneMenu(QMenu *tm);
 	void AddLoadSceneMenu(QMenu *tm);
+
+protected:
+	bool eventFilter(QObject *obj, QEvent *event) override;
 private slots:
 	void SceneChanged();
 	void Add(QString name = "");

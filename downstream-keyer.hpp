@@ -158,6 +158,8 @@ public:
 
 	void Save(obs_data_t *data);
 	void Load(obs_data_t *data);
+	// adds a widget at the right end of the bottom toolbar
+	void AddToolbarWidget(QWidget *widget);
 	void SetTransition(const char *transition_name, enum transitionType transition_type = match);
 	std::string GetTransition(enum transitionType transition_type = match);
 	void SetTransitionDuration(int duration, enum transitionType transition_type = match);

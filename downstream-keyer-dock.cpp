@@ -5,6 +5,10 @@
 #include "obs-websocket-api.h"
 #include "version.h"
 #include <obs-module.h>
+#include <algorithm>
+#include <functional>
+#include <QApplication>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMainWindow>
@@ -12,6 +16,7 @@
 #include <QPixmap>
 #include <QTabBar>
 #include <QMenu>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QThread>
 #include <QVBoxLayout>
@@ -35,46 +40,24 @@ MODULE_EXTERN struct obs_source_info output_source_info;
 std::map<std::string, DownstreamKeyerDock *> _dsks;
 obs_websocket_vendor vendor = nullptr;
 
-// Tab bar that fills a tab with its tally colour (tab data): red on program, green on the studio mode preview
-class TallyTabBar : public QTabBar {
+// Keyer tab widget whose own tab bar stays hidden: the dock shows the tabs as a grid of buttons instead (three to a
+// row) and is told when tabs are added or removed. The hidden tab bar still holds the order, names and tally colours.
+class KeyerTabWidget : public QTabWidget {
 public:
-	using QTabBar::QTabBar;
+	explicit KeyerTabWidget(QWidget *parent) : QTabWidget(parent) { tabBar()->hide(); }
+	std::function<void()> tabsChanged;
 
 protected:
-	void paintEvent(QPaintEvent *event) override
+	void tabInserted(int) override
 	{
-		QTabBar::paintEvent(event);
-		QPainter painter(this);
-		painter.setRenderHint(QPainter::Antialiasing);
-		for (int i = 0; i < count(); i++) {
-			QColor tally = tabData(i).value<QColor>();
-			// the selected tab is gray when it is neither on program nor on the preview
-			if (!tally.isValid() && i == currentIndex())
-				tally = QColor(85, 85, 85);
-			if (!tally.isValid())
-				continue;
-			const QRect rect = tabRect(i).adjusted(1, 1, -1, -1);
-			painter.setPen(Qt::NoPen);
-			painter.setBrush(tally);
-			painter.drawRoundedRect(rect, 3, 3);
-			if (i == currentIndex()) {
-				// keep the selected tab recognisable
-				painter.setBrush(QColor(255, 255, 255, 200));
-				painter.drawRect(QRect(rect.left() + 3, rect.bottom() - 2, rect.width() - 6, 3));
-			}
-			QFont font = painter.font();
-			font.setBold(true);
-			painter.setFont(font);
-			painter.setPen(Qt::white);
-			painter.drawText(rect, Qt::AlignCenter,
-					 QFontMetrics(font).elidedText(tabText(i), Qt::ElideRight, rect.width() - 8));
-		}
+		if (tabsChanged)
+			tabsChanged();
 	}
-};
-
-class TallyTabWidget : public QTabWidget {
-public:
-	explicit TallyTabWidget(QWidget *parent) : QTabWidget(parent) { setTabBar(new TallyTabBar(this)); }
+	void tabRemoved(int) override
+	{
+		if (tabsChanged)
+			tabsChanged();
+	}
 };
 
 extern "C" {
@@ -468,8 +451,8 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v,
 		signal_handler_connect(sh, "remove", remove_canvas, this);
 	}
 
-	tabs = new TallyTabWidget(this);
-	tabs->setMovable(true);
+	auto keyerTabs = new KeyerTabWidget(this);
+	tabs = keyerTabs;
 
 	connect(tabs->tabBar(), &QTabBar::tabMoved, tabs->tabBar(), [this]() {
 		int count = tabs->count();
@@ -477,24 +460,26 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v,
 			auto w = dynamic_cast<DownstreamKeyer *>(tabs->widget(i));
 			w->SetOutputChannel(outputChannel + i);
 		}
+		UpdateTabTally();
 	});
 
-	auto config = new QPushButton(this);
-	config->setProperty("themeID", "configIconSmall");
-	config->setProperty("class", "icon-gear");
+	// the keyer tabs, shown as a grid of buttons three to a row
+	tabGrid = new QGridLayout;
+	tabGrid->setContentsMargins(4, 0, 4, 0);
+	tabGrid->setSpacing(4);
+	keyerTabs->tabsChanged = [this]() {
+		UpdateTabTally();
+	};
+	connect(tabs, &QTabWidget::currentChanged, this, [this]() { UpdateTabTally(); });
 
-	connect(config, &QAbstractButton::clicked, this, &DownstreamKeyerDock::ConfigClicked);
-
-	tabs->setCornerWidget(config);
-
-	// All Keyers: buttons above the tabs that act on every keyer in this dock
+	// All Keyer Actions: buttons above the tabs that act on every keyer in this dock
 	auto allKeyersTitle = new QLabel(QT_UTF8(obs_module_text("AllKeyersTitle")), this);
 	QFont titleFont = allKeyersTitle->font();
 	titleFont.setBold(true);
 	allKeyersTitle->setFont(titleFont);
 
-	auto keyerOffButton = new QPushButton(QT_UTF8(obs_module_text("AllKeyersOff")), this);
-	connect(keyerOffButton, &QPushButton::clicked, this, &DownstreamKeyerDock::AllKeyersOff);
+	allKeyersOffButton = new QPushButton(QT_UTF8(obs_module_text("AllKeyersOff")), this);
+	connect(allKeyersOffButton, &QPushButton::clicked, this, &DownstreamKeyerDock::AllKeyersOff);
 
 	offAtSceneChangeButton = new QPushButton(QT_UTF8(obs_module_text("SceneChangeOff")), this);
 	offAtSceneChangeButton->setCheckable(true);
@@ -506,17 +491,21 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v,
 	holdKeyersButton->setToolTip(QT_UTF8(obs_module_text("HoldKeyersTip")));
 	connect(holdKeyersButton, &QPushButton::clicked, this, &DownstreamKeyerDock::SetHoldKeyers);
 
-	auto allKeyersRow = new QHBoxLayout;
-	allKeyersRow->setContentsMargins(4, 0, 4, 0);
-	allKeyersRow->setSpacing(4);
-	allKeyersRow->addWidget(keyerOffButton);
-	allKeyersRow->addWidget(offAtSceneChangeButton);
-	allKeyersRow->addWidget(holdKeyersButton);
-
 	transitionKeyersButton = new QPushButton(QT_UTF8(obs_module_text("TransitionKeyers")), this);
 	transitionKeyersButton->setToolTip(QT_UTF8(obs_module_text("TransitionKeyersTip")));
 	connect(transitionKeyersButton, &QPushButton::clicked, this, &DownstreamKeyerDock::TransitionKeyers);
-	allKeyersRow->addWidget(transitionKeyersButton);
+
+	// 2x2 grid so the dock can be narrower than a single row of four buttons; outside studio mode All Keyers Off
+	// takes the whole top row (see UpdateAllKeyersButtons)
+	allKeyersGrid = new QGridLayout;
+	allKeyersGrid->setContentsMargins(4, 0, 4, 0);
+	allKeyersGrid->setSpacing(4);
+	allKeyersGrid->addWidget(allKeyersOffButton, 0, 0);
+	allKeyersGrid->addWidget(transitionKeyersButton, 0, 1);
+	allKeyersGrid->addWidget(offAtSceneChangeButton, 1, 0);
+	allKeyersGrid->addWidget(holdKeyersButton, 1, 1);
+	allKeyersGrid->setColumnStretch(0, 1);
+	allKeyersGrid->setColumnStretch(1, 1);
 
 	auto l = new QVBoxLayout;
 	l->setContentsMargins(0, 0, 0, 0);
@@ -525,7 +514,8 @@ DownstreamKeyerDock::DownstreamKeyerDock(QWidget *parent, int oc, obs_view_t *v,
 	titleRow->setContentsMargins(4, 4, 4, 0);
 	titleRow->addWidget(allKeyersTitle);
 	l->addLayout(titleRow);
-	l->addLayout(allKeyersRow);
+	l->addLayout(allKeyersGrid);
+	l->addLayout(tabGrid);
 	l->addWidget(tabs);
 	setLayout(l);
 	UpdateAllKeyersButtons();
@@ -628,7 +618,89 @@ void DownstreamKeyerDock::UpdateTabTally()
 			tally = QColor(46, 125, 50);
 		tabs->tabBar()->setTabData(i, tally);
 	}
-	tabs->tabBar()->update();
+	SyncTabButtons();
+}
+
+// the keyer tabs as buttons, three to a row: a button never gets narrower than its name, so neither does the dock
+void DownstreamKeyerDock::SyncTabButtons()
+{
+	if (closing)
+		return;
+	const int count = tabs->count();
+	if ((int)tabButtons.size() != count) {
+		for (auto b : tabButtons) {
+			tabGrid->removeWidget(b);
+			b->hide();
+			b->deleteLater();
+		}
+		tabButtons.clear();
+		const int columns = std::max(1, std::min(count, 3));
+		for (int i = 0; i < count; i++) {
+			auto b = new QPushButton(this);
+			b->setCheckable(true);
+			b->installEventFilter(this);
+			connect(b, &QPushButton::clicked, this, [this, b]() {
+				auto it = std::find(tabButtons.begin(), tabButtons.end(), b);
+				if (it != tabButtons.end())
+					tabs->setCurrentIndex((int)(it - tabButtons.begin()));
+				SyncTabButtons();
+			});
+			tabGrid->addWidget(b, i / columns, i % columns);
+			tabButtons.push_back(b);
+		}
+		for (int c = 0; c < 3; c++)
+			tabGrid->setColumnStretch(c, c < columns ? 1 : 0);
+	}
+	const int current = tabs->currentIndex();
+	for (int i = 0; i < count; i++) {
+		auto b = tabButtons[i];
+		b->setText(tabs->tabText(i));
+		b->setChecked(i == current);
+		const QColor tally = tabs->tabBar()->tabData(i).value<QColor>();
+		QString style;
+		if (tally.isValid()) {
+			style = QString("background-color: %1; color: white; font-weight: bold;").arg(tally.name());
+			// keep the selected tab recognisable
+			if (i == current)
+				style += " border: 2px solid white;";
+		}
+		b->setStyleSheet(style);
+	}
+}
+
+// drag a keyer tab button onto another to move it there, as the tab bar allowed
+bool DownstreamKeyerDock::eventFilter(QObject *obj, QEvent *event)
+{
+	auto it = std::find(tabButtons.begin(), tabButtons.end(), obj);
+	if (it != tabButtons.end()) {
+		const int index = (int)(it - tabButtons.begin());
+		if (event->type() == QEvent::MouseButtonPress) {
+			auto me = static_cast<QMouseEvent *>(event);
+			if (me->button() == Qt::LeftButton) {
+				dragFrom = index;
+				dragStart = me->globalPosition().toPoint();
+			}
+		} else if (event->type() == QEvent::MouseButtonRelease && dragFrom == index) {
+			dragFrom = -1;
+			const QPoint pos = static_cast<QMouseEvent *>(event)->globalPosition().toPoint();
+			if ((pos - dragStart).manhattanLength() >= QApplication::startDragDistance()) {
+				for (int to = 0; to < (int)tabButtons.size(); to++) {
+					if (to == index || !tabButtons[to]->rect().contains(tabButtons[to]->mapFromGlobal(pos)))
+						continue;
+					QMetaObject::invokeMethod(
+						this,
+						[this, index, to]() {
+							tabs->tabBar()->moveTab(index, to);
+							tabs->setCurrentIndex(to);
+							UpdateTabTally();
+						},
+						Qt::QueuedConnection);
+					break;
+				}
+			}
+		}
+	}
+	return QFrame::eventFilter(obj, event);
 }
 
 SceneChangeContext DownstreamKeyerDock::GetSceneChangeContext(const std::string &scene, bool forPreview)
@@ -650,6 +722,13 @@ void DownstreamKeyerDock::SetupKeyer(DownstreamKeyer *keyer)
 					 bool forPreview) { return GetSceneChangeContext(scene, forPreview); },
 				  [this]() { RefreshPreviewOverlays(false); });
 	keyer->SetHeld(holdKeyers);
+
+	// the settings gear sits at the right of the keyer's bottom toolbar, so the tabs can use the full width
+	auto config = new QPushButton(keyer);
+	config->setProperty("themeID", "configIconSmall");
+	config->setProperty("class", "icon-gear");
+	connect(config, &QAbstractButton::clicked, this, &DownstreamKeyerDock::ConfigClicked);
+	keyer->AddToolbarWidget(config);
 }
 
 void DownstreamKeyerDock::AllKeyersOff()
@@ -685,7 +764,11 @@ void DownstreamKeyerDock::UpdateAllKeyersButtons()
 	// Hold Keyers overrides Keyer Off at Scene Change
 	offAtSceneChangeButton->setEnabled(!holdKeyers);
 	// the main output only: studio mode does not apply to views and canvases
-	transitionKeyersButton->setVisible(!view && !canvas && obs_frontend_preview_program_mode_active());
+	const bool studio = !view && !canvas && obs_frontend_preview_program_mode_active();
+	transitionKeyersButton->setVisible(studio);
+	// without Transition Keyers, All Keyers Off takes the whole top row
+	allKeyersGrid->removeWidget(allKeyersOffButton);
+	allKeyersGrid->addWidget(allKeyersOffButton, 0, 0, 1, studio ? 1 : 2);
 }
 
 void DownstreamKeyerDock::TransitionKeyers()
@@ -713,6 +796,8 @@ void DownstreamKeyerDock::TransitionKeyers()
 
 DownstreamKeyerDock::~DownstreamKeyerDock()
 {
+	// the tab buttons are not kept in sync while the keyers are taken down
+	closing = true;
 	if (!viewName.empty()) {
 		_dsks.erase(viewName);
 	}
@@ -1118,6 +1203,7 @@ void DownstreamKeyerDock::Rename()
 	std::string name = QT_TO_UTF8(tabs->tabText(i));
 	if (NameDialog::AskForName(this, name)) {
 		tabs->setTabText(i, QT_UTF8(name.c_str()));
+		SyncTabButtons();
 	}
 }
 
