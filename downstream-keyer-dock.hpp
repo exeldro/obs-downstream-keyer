@@ -85,6 +85,10 @@ private:
 	void SetHoldKeyers(bool on);
 	void UpdateAllKeyersButtons();
 
+	bool KeyerNameExists(const QString &name, int exceptIndex = -1);
+	QString UniqueKeyerName(const QString &base);
+	bool AskForKeyerName(std::string &name, int exceptIndex = -1);
+
 	void ClearKeyers();
 	void AddDefaultKeyer();
 	void ConfigClicked();

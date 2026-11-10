@@ -16,7 +16,9 @@
 #include <QPixmap>
 #include <QTabBar>
 #include <QMenu>
+#include <QMessageBox>
 #include <QMouseEvent>
+#include <QRegularExpression>
 #include <QPushButton>
 #include <QThread>
 #include <QVBoxLayout>
@@ -667,8 +669,8 @@ void DownstreamKeyerDock::SyncTabButtons()
 			tabGrid->addWidget(b, i / columns, i % columns);
 			tabButtons.push_back(b);
 		}
-		for (int c = 0; c < 3; c++)
-			tabGrid->setColumnStretch(c, c < columns ? 1 : 0);
+		for (int c = 0; c < columns; c++)
+			tabGrid->setColumnStretch(c, 1);
 	}
 	const int current = tabs->currentIndex();
 	for (int i = 0; i < count; i++) {
@@ -1194,11 +1196,54 @@ void DownstreamKeyerDock::ConfigClicked()
 	popup.exec(QCursor::pos());
 }
 
+// a keyer name is taken when another keyer has it, ignoring case (websocket requests find keyers by name)
+bool DownstreamKeyerDock::KeyerNameExists(const QString &name, int exceptIndex)
+{
+	for (int i = 0; i < tabs->count(); i++) {
+		if (i == exceptIndex)
+			continue;
+		if (tabs->tabText(i).compare(name, Qt::CaseInsensitive) == 0)
+			return true;
+		auto w = tabs->widget(i);
+		if (w && w->objectName().compare(name, Qt::CaseInsensitive) == 0)
+			return true;
+	}
+	return false;
+}
+
+// the default name, numbered past the keyers that already exist: DSK 1, DSK 2, ...
+QString DownstreamKeyerDock::UniqueKeyerName(const QString &base)
+{
+	if (!KeyerNameExists(base))
+		return base;
+	static const QRegularExpression trailingNumber(QStringLiteral("^(.*?)\\s*(\\d+)$"));
+	const auto match = trailingNumber.match(base);
+	const QString stem = match.hasMatch() ? match.captured(1) : base;
+	for (int n = match.hasMatch() ? match.captured(2).toInt() + 1 : 2;; n++) {
+		const QString name = QString("%1 %2").arg(stem).arg(n);
+		if (!KeyerNameExists(name))
+			return name;
+	}
+}
+
+// asks for a keyer name until it is not taken by another keyer
+bool DownstreamKeyerDock::AskForKeyerName(std::string &name, int exceptIndex)
+{
+	for (;;) {
+		if (!NameDialog::AskForName(this, name))
+			return false;
+		if (!KeyerNameExists(QT_UTF8(name.c_str()), exceptIndex))
+			return true;
+		QMessageBox::warning(this, QT_UTF8(obs_module_text("DownstreamKeyer")),
+				     QT_UTF8(obs_module_text("KeyerNameExists")));
+	}
+}
+
 void DownstreamKeyerDock::Add(QString name)
 {
 	if (name.isEmpty()) {
-		std::string std_name = obs_module_text("DefaultName");
-		if (!NameDialog::AskForName(this, std_name)) {
+		std::string std_name = QT_TO_UTF8(UniqueKeyerName(QT_UTF8(obs_module_text("DefaultName"))));
+		if (!AskForKeyerName(std_name)) {
 			return;
 		}
 		name = QString::fromUtf8(std_name.c_str());
@@ -1220,7 +1265,7 @@ void DownstreamKeyerDock::Rename()
 		return;
 	}
 	std::string name = QT_TO_UTF8(tabs->tabText(i));
-	if (NameDialog::AskForName(this, name)) {
+	if (AskForKeyerName(name, i)) {
 		tabs->setTabText(i, QT_UTF8(name.c_str()));
 		SyncTabButtons();
 	}
@@ -1408,14 +1453,10 @@ void DownstreamKeyerDock::add_downstream_keyer(obs_data_t *request_data, obs_dat
 		return;
 	}
 	QString dskName = QString::fromUtf8(dsk_name);
-	const int count = dsk->tabs->count();
-	for (int i = 0; i < count; i++) {
-		auto w = dynamic_cast<DownstreamKeyer *>(dsk->tabs->widget(i));
-		if (w->objectName() == dskName) {
-			obs_data_set_string(response_data, "error", "'dsk_name' exists");
-			obs_data_set_bool(response_data, "success", false);
-			return;
-		}
+	if (dsk->KeyerNameExists(dskName)) {
+		obs_data_set_string(response_data, "error", "'dsk_name' exists");
+		obs_data_set_bool(response_data, "success", false);
+		return;
 	}
 	QMetaObject::invokeMethod(dsk, "Add", Q_ARG(QString, dskName));
 	obs_data_set_bool(response_data, "success", true);
